@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.speech.RecognizerIntent;
+import android.speech.tts.TextToSpeech;
 import android.view.Gravity;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
@@ -24,12 +25,36 @@ public class MainActivity extends Activity {
 
     private EditText commandInput;
     private TextView responseText;
+    private TextToSpeech textToSpeech;
+    private boolean speechReady = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        initializeSpeech();
         createInterface();
+    }
+
+    private void initializeSpeech() {
+        textToSpeech = new TextToSpeech(
+                this,
+                status -> {
+                    if (status == TextToSpeech.SUCCESS) {
+                        int result = textToSpeech.setLanguage(
+                                Locale.getDefault()
+                        );
+
+                        speechReady =
+                                result != TextToSpeech.LANG_MISSING_DATA
+                                && result != TextToSpeech.LANG_NOT_SUPPORTED;
+
+                        if (speechReady) {
+                            textToSpeech.setSpeechRate(1.0f);
+                        }
+                    }
+                }
+        );
     }
 
     private void createInterface() {
@@ -69,6 +94,10 @@ public class MainActivity extends Activity {
         voiceButton.setText("SPEAK COMMAND");
         layout.addView(voiceButton);
 
+        Button stopButton = new Button(this);
+        stopButton.setText("STOP SPEAKING");
+        layout.addView(stopButton);
+
         responseText = new TextView(this);
         responseText.setText(
                 "System ready. Type or speak a command."
@@ -87,7 +116,27 @@ public class MainActivity extends Activity {
                 view -> startVoiceRecognition()
         );
 
+        stopButton.setOnClickListener(view -> {
+            if (textToSpeech != null) {
+                textToSpeech.stop();
+            }
+            responseText.setText("Speech stopped.");
+        });
+
         setContentView(layout);
+    }
+
+    private void speakResponse(String message) {
+        responseText.setText(message);
+
+        if (speechReady && textToSpeech != null) {
+            textToSpeech.speak(
+                    message,
+                    TextToSpeech.QUEUE_FLUSH,
+                    null,
+                    "PAI_RESPONSE"
+            );
+        }
     }
 
     private void startVoiceRecognition() {
@@ -116,11 +165,9 @@ public class MainActivity extends Activity {
                     VOICE_REQUEST_CODE
             );
         } catch (Exception exception) {
-            Toast.makeText(
-                    this,
-                    "Speech recognition is unavailable.",
-                    Toast.LENGTH_LONG
-            ).show();
+            speakResponse(
+                    "Speech recognition is unavailable."
+            );
         }
     }
 
@@ -161,23 +208,15 @@ public class MainActivity extends Activity {
         hideKeyboard();
 
         if (command.isEmpty()) {
-            responseText.setText(
-                    "Please type or speak a command."
-            );
+            speakResponse("Please type or speak a command.");
             return;
         }
 
         if (command.contains("whatsapp")) {
-            openApp(
-                    "com.whatsapp",
-                    "WhatsApp"
-            );
+            openApp("com.whatsapp", "WhatsApp");
 
         } else if (command.contains("youtube")) {
-            openApp(
-                    "com.google.android.youtube",
-                    "YouTube"
-            );
+            openApp("com.google.android.youtube", "YouTube");
 
         } else if (command.contains("settings")) {
             openSettings();
@@ -185,15 +224,37 @@ public class MainActivity extends Activity {
         } else if (command.contains("camera")) {
             openCamera();
 
+        } else if (command.contains("stop speaking")
+                || command.equals("stop talking")) {
+
+            if (textToSpeech != null) {
+                textToSpeech.stop();
+            }
+
+            responseText.setText("Speech stopped.");
+
+        } else if (command.contains("hello")
+                || command.contains("hi")) {
+
+            speakResponse(
+                    "Hello! I am P AI System Manager. "
+                    + "How can I help you?"
+            );
+
+        } else if (command.contains("your name")) {
+            speakResponse(
+                    "My name is P AI System Manager."
+            );
+
         } else if (command.contains("lock")) {
-            responseText.setText(
+            speakResponse(
                     "Screen locking is not implemented yet."
             );
 
         } else {
-            responseText.setText(
+            speakResponse(
                     "Command not recognized. Try WhatsApp, "
-                            + "YouTube, Settings, or Camera."
+                    + "YouTube, Settings, or Camera."
             );
         }
     }
@@ -207,52 +268,42 @@ public class MainActivity extends Activity {
                     .getLaunchIntentForPackage(packageName);
 
             if (intent != null) {
+                speakResponse("Opening " + appName + ".");
                 startActivity(intent);
-                responseText.setText(
-                        "Opening " + appName + "..."
-                );
             } else {
-                responseText.setText(
+                speakResponse(
                         appName + " is unavailable or not installed."
                 );
             }
 
         } catch (Exception exception) {
-            responseText.setText(
-                    "Unable to open " + appName + "."
-            );
+            speakResponse("Unable to open " + appName + ".");
         }
     }
 
     private void openSettings() {
         try {
-            Intent intent = new Intent(
-                    Settings.ACTION_SETTINGS
-            );
+            speakResponse("Opening Settings.");
 
-            startActivity(intent);
-            responseText.setText("Opening Settings...");
+            startActivity(new Intent(
+                    Settings.ACTION_SETTINGS
+            ));
 
         } catch (Exception exception) {
-            responseText.setText(
-                    "Unable to open Settings."
-            );
+            speakResponse("Unable to open Settings.");
         }
     }
 
     private void openCamera() {
         try {
-            Intent intent = new Intent(
-                    "android.media.action.IMAGE_CAPTURE"
-            );
+            speakResponse("Opening Camera.");
 
-            startActivity(intent);
-            responseText.setText("Opening Camera...");
+            startActivity(new Intent(
+                    "android.media.action.IMAGE_CAPTURE"
+            ));
 
         } catch (Exception exception) {
-            responseText.setText(
-                    "Unable to open Camera."
-            );
+            speakResponse("Unable to open Camera.");
         }
     }
 
@@ -272,5 +323,15 @@ public class MainActivity extends Activity {
                     0
             );
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (textToSpeech != null) {
+            textToSpeech.stop();
+            textToSpeech.shutdown();
+        }
+
+        super.onDestroy();
     }
 }
