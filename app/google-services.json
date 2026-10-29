@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "216766435598",
+    "project_id": "p-ai-system-manager",
+    "storage_bucket": "p-ai-system-manager.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:216766435598:android:f6a07d5e75ab37a247075f",
+        "android_client_info": {
+          "package_name": "com.pgraphics.paisystemmanager"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAyaTqxt-lTCSH0Hm3kAdS0BL26S7B16zo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
