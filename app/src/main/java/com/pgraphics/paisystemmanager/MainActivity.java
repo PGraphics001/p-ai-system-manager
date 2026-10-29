@@ -8,6 +8,7 @@ import android.os.Bundle;
 import android.provider.Settings;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
@@ -33,6 +34,7 @@ import java.util.concurrent.Executor;
 
 public class MainActivity extends Activity {
 
+    private static final String TAG = "PAI_AI";
     private static final int VOICE_REQUEST_CODE = 100;
 
     private EditText commandInput;
@@ -62,12 +64,16 @@ public class MainActivity extends Activity {
             GenerativeModel model =
                     FirebaseAI.getInstance(
                             GenerativeBackend.googleAI()
-                    ).generativeModel("gemini-2.5-flash");
+                    ).generativeModel("gemini-3.5-flash");
 
             aiModel = GenerativeModelFutures.from(model);
 
-        } catch (Exception exception) {
+            Log.d(TAG, "AI model initialized.");
+
+        } catch (Exception e) {
             aiModel = null;
+
+            Log.e(TAG, "AI initialization failed.", e);
         }
     }
 
@@ -94,57 +100,72 @@ public class MainActivity extends Activity {
 
     private void createInterface() {
         LinearLayout layout = new LinearLayout(this);
+
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setGravity(Gravity.CENTER_HORIZONTAL);
         layout.setPadding(24, 32, 24, 24);
         layout.setBackgroundColor(Color.rgb(18, 18, 18));
 
         TextView title = new TextView(this);
+
         title.setText("P AI SYSTEM MANAGER");
         title.setTextColor(Color.rgb(255, 215, 0));
         title.setTextSize(24);
         title.setGravity(Gravity.CENTER);
+
         layout.addView(title);
 
         TextView subtitle = new TextView(this);
+
         subtitle.setText("Your Intelligent Phone Assistant");
         subtitle.setTextColor(Color.WHITE);
         subtitle.setTextSize(15);
         subtitle.setGravity(Gravity.CENTER);
         subtitle.setPadding(0, 8, 0, 20);
+
         layout.addView(subtitle);
 
         commandInput = new EditText(this);
+
         commandInput.setHint("Ask P AI anything...");
         commandInput.setTextColor(Color.WHITE);
         commandInput.setHintTextColor(Color.LTGRAY);
         commandInput.setMinLines(1);
         commandInput.setMaxLines(4);
+
         layout.addView(commandInput);
 
         executeButton = new Button(this);
+
         executeButton.setText("ASK AI / EXECUTE");
+
         layout.addView(executeButton);
 
         Button voiceButton = new Button(this);
+
         voiceButton.setText("SPEAK COMMAND");
+
         layout.addView(voiceButton);
 
         Button stopButton = new Button(this);
+
         stopButton.setText("STOP SPEAKING");
+
         layout.addView(stopButton);
 
         ScrollView scrollView = new ScrollView(this);
 
         responseText = new TextView(this);
+
         responseText.setText(
                 "Welcome to P AI System Manager!\n\n"
-                + "Ask questions or try commands such as:\n"
+                + "Ask a question or try:\n"
                 + "• Open WhatsApp\n"
                 + "• Open YouTube\n"
                 + "• Open Settings\n"
                 + "• Open Camera"
         );
+
         responseText.setTextColor(Color.WHITE);
         responseText.setTextSize(16);
         responseText.setPadding(0, 24, 0, 16);
@@ -217,7 +238,10 @@ public class MainActivity extends Activity {
                     intent,
                     VOICE_REQUEST_CODE
             );
-        } catch (Exception exception) {
+
+        } catch (Exception e) {
+            Log.e(TAG, "Speech recognition failed.", e);
+
             speakResponse(
                     "Speech recognition is unavailable."
             );
@@ -318,6 +342,7 @@ public class MainActivity extends Activity {
                     "Hello! I am P AI System Manager. "
                     + "How can I help you today?"
             );
+
             return;
         }
 
@@ -325,6 +350,7 @@ public class MainActivity extends Activity {
             speakResponse(
                     "My name is P AI System Manager."
             );
+
             return;
         }
 
@@ -334,9 +360,10 @@ public class MainActivity extends Activity {
     private void askGemini(String question) {
         if (aiModel == null) {
             speakResponse(
-                    "The AI service could not initialize. "
-                    + "Please check your Firebase configuration."
+                    "The AI model failed to initialize. "
+                    + "Please check the Firebase setup."
             );
+
             return;
         }
 
@@ -346,20 +373,24 @@ public class MainActivity extends Activity {
                     "Please wait for the current answer.",
                     Toast.LENGTH_SHORT
             ).show();
+
             return;
         }
 
         requestRunning = true;
         executeButton.setEnabled(false);
+
         responseText.setText("P AI is thinking...");
 
         Content prompt = new Content.Builder()
                 .addText(
                         "You are P AI System Manager, a helpful "
-                        + "Android assistant. Answer clearly and "
-                        + "accurately. Do not claim to perform "
-                        + "phone actions unless the app actually "
-                        + "supports them.\n\nUser: "
+                        + "Android assistant. Answer the user's "
+                        + "question clearly, accurately, and "
+                        + "usefully. If you are uncertain, say so. "
+                        + "Never claim to perform phone actions "
+                        + "unless this app actually supports them."
+                        + "\n\nUser question: "
                         + question
                 )
                 .build();
@@ -385,8 +416,8 @@ public class MainActivity extends Activity {
                                     || answer.trim().isEmpty()) {
 
                                 speakResponse(
-                                        "I couldn't generate an answer. "
-                                        + "Please try another question."
+                                        "The AI returned an empty "
+                                        + "answer. Please try again."
                                 );
 
                             } else {
@@ -399,24 +430,54 @@ public class MainActivity extends Activity {
                             requestRunning = false;
                             executeButton.setEnabled(true);
 
+                            Log.e(
+                                    TAG,
+                                    "Gemini request failed.",
+                                    error
+                            );
+
+                            String details = getErrorDetails(error);
+
                             speakResponse(
-                                    "I couldn't reach the AI service. "
-                                    + "Check your internet connection "
-                                    + "and Firebase AI Logic configuration."
+                                    "AI request failed: " + details
                             );
                         }
                     },
                     mainExecutor
             );
 
-        } catch (Exception exception) {
+        } catch (Exception e) {
             requestRunning = false;
             executeButton.setEnabled(true);
 
+            Log.e(TAG, "Could not submit AI request.", e);
+
             speakResponse(
-                    "An error occurred while sending your question."
+                    "Could not submit the AI request: "
+                    + getErrorDetails(e)
             );
         }
+    }
+
+    private String getErrorDetails(Throwable error) {
+        Throwable current = error;
+
+        while (current.getCause() != null
+                && current.getCause() != current) {
+            current = current.getCause();
+        }
+
+        String message = current.getMessage();
+
+        if (message == null || message.trim().isEmpty()) {
+            message = current.getClass().getSimpleName();
+        }
+
+        if (message.length() > 300) {
+            message = message.substring(0, 300);
+        }
+
+        return message;
     }
 
     private void openApp(
@@ -430,13 +491,16 @@ public class MainActivity extends Activity {
             if (intent != null) {
                 speakResponse("Opening " + appName + ".");
                 startActivity(intent);
+
             } else {
                 speakResponse(
                         appName + " is not installed or unavailable."
                 );
             }
 
-        } catch (Exception exception) {
+        } catch (Exception e) {
+            Log.e(TAG, "Could not open " + appName, e);
+
             speakResponse("Unable to open " + appName + ".");
         }
     }
@@ -449,7 +513,9 @@ public class MainActivity extends Activity {
                     new Intent(Settings.ACTION_SETTINGS)
             );
 
-        } catch (Exception exception) {
+        } catch (Exception e) {
+            Log.e(TAG, "Could not open Settings.", e);
+
             speakResponse("Unable to open Settings.");
         }
     }
@@ -470,7 +536,9 @@ public class MainActivity extends Activity {
                 speakResponse("No camera application was found.");
             }
 
-        } catch (Exception exception) {
+        } catch (Exception e) {
+            Log.e(TAG, "Could not open Camera.", e);
+
             speakResponse("Unable to open Camera.");
         }
     }
