@@ -1,12 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Internet access for Firebase AI Logic and Gemini -->
+    <uses-permission
+        android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="false"
         android:label="P AI System Manager"
         android:theme="@android:style/Theme.Material.NoActionBar"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="false">
 
+        <!-- Main application screen -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
