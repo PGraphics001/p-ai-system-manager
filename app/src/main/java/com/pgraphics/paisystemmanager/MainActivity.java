@@ -13,11 +13,23 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.firebase.ai.FirebaseAI;
+import com.google.firebase.ai.GenerativeModel;
+import com.google.firebase.ai.java.GenerativeModelFutures;
+import com.google.firebase.ai.type.Content;
+import com.google.firebase.ai.type.GenerateContentResponse;
+import com.google.firebase.ai.type.GenerativeBackend;
+
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.concurrent.Executor;
 
 public class MainActivity extends Activity {
 
@@ -25,15 +37,38 @@ public class MainActivity extends Activity {
 
     private EditText commandInput;
     private TextView responseText;
+    private Button executeButton;
+
     private TextToSpeech textToSpeech;
     private boolean speechReady = false;
+    private boolean requestRunning = false;
+
+    private GenerativeModelFutures aiModel;
+
+    private final Executor mainExecutor =
+            command -> runOnUiThread(command);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         initializeSpeech();
+        initializeAI();
         createInterface();
+    }
+
+    private void initializeAI() {
+        try {
+            GenerativeModel model =
+                    FirebaseAI.getInstance(
+                            GenerativeBackend.googleAI()
+                    ).generativeModel("gemini-2.5-flash");
+
+            aiModel = GenerativeModelFutures.from(model);
+
+        } catch (Exception exception) {
+            aiModel = null;
+        }
     }
 
     private void initializeSpeech() {
@@ -61,7 +96,7 @@ public class MainActivity extends Activity {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setGravity(Gravity.CENTER_HORIZONTAL);
-        layout.setPadding(24, 40, 24, 24);
+        layout.setPadding(24, 32, 24, 24);
         layout.setBackgroundColor(Color.rgb(18, 18, 18));
 
         TextView title = new TextView(this);
@@ -76,18 +111,19 @@ public class MainActivity extends Activity {
         subtitle.setTextColor(Color.WHITE);
         subtitle.setTextSize(15);
         subtitle.setGravity(Gravity.CENTER);
-        subtitle.setPadding(0, 8, 0, 24);
+        subtitle.setPadding(0, 8, 0, 20);
         layout.addView(subtitle);
 
         commandInput = new EditText(this);
-        commandInput.setHint("Type a command...");
-        commandInput.setSingleLine(true);
+        commandInput.setHint("Ask P AI anything...");
         commandInput.setTextColor(Color.WHITE);
         commandInput.setHintTextColor(Color.LTGRAY);
+        commandInput.setMinLines(1);
+        commandInput.setMaxLines(4);
         layout.addView(commandInput);
 
-        Button executeButton = new Button(this);
-        executeButton.setText("EXECUTE COMMAND");
+        executeButton = new Button(this);
+        executeButton.setText("ASK AI / EXECUTE");
         layout.addView(executeButton);
 
         Button voiceButton = new Button(this);
@@ -98,15 +134,31 @@ public class MainActivity extends Activity {
         stopButton.setText("STOP SPEAKING");
         layout.addView(stopButton);
 
+        ScrollView scrollView = new ScrollView(this);
+
         responseText = new TextView(this);
         responseText.setText(
-                "System ready. Type or speak a command."
+                "Welcome to P AI System Manager!\n\n"
+                + "Ask questions or try commands such as:\n"
+                + "• Open WhatsApp\n"
+                + "• Open YouTube\n"
+                + "• Open Settings\n"
+                + "• Open Camera"
         );
         responseText.setTextColor(Color.WHITE);
         responseText.setTextSize(16);
-        responseText.setGravity(Gravity.CENTER);
-        responseText.setPadding(0, 30, 0, 0);
-        layout.addView(responseText);
+        responseText.setPadding(0, 24, 0, 16);
+
+        scrollView.addView(responseText);
+
+        layout.addView(
+                scrollView,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        0,
+                        1
+                )
+        );
 
         executeButton.setOnClickListener(
                 view -> executeCommand()
@@ -120,6 +172,7 @@ public class MainActivity extends Activity {
             if (textToSpeech != null) {
                 textToSpeech.stop();
             }
+
             responseText.setText("Speech stopped.");
         });
 
@@ -156,7 +209,7 @@ public class MainActivity extends Activity {
 
         intent.putExtra(
                 RecognizerIntent.EXTRA_PROMPT,
-                "Speak your command"
+                "Speak your command or question"
         );
 
         try {
@@ -200,10 +253,13 @@ public class MainActivity extends Activity {
     }
 
     private void executeCommand() {
-        String command = commandInput.getText()
+        String originalCommand = commandInput.getText()
                 .toString()
-                .trim()
-                .toLowerCase(Locale.ROOT);
+                .trim();
+
+        String command = originalCommand.toLowerCase(
+                Locale.ROOT
+        );
 
         hideKeyboard();
 
@@ -212,19 +268,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        if (command.contains("whatsapp")) {
-            openApp("com.whatsapp", "WhatsApp");
-
-        } else if (command.contains("youtube")) {
-            openApp("com.google.android.youtube", "YouTube");
-
-        } else if (command.contains("settings")) {
-            openSettings();
-
-        } else if (command.contains("camera")) {
-            openCamera();
-
-        } else if (command.contains("stop speaking")
+        if (command.equals("stop speaking")
                 || command.equals("stop talking")) {
 
             if (textToSpeech != null) {
@@ -232,29 +276,145 @@ public class MainActivity extends Activity {
             }
 
             responseText.setText("Speech stopped.");
+            return;
+        }
 
-        } else if (command.contains("hello")
-                || command.contains("hi")) {
+        if (command.equals("open whatsapp")
+                || command.equals("whatsapp")) {
+
+            openApp("com.whatsapp", "WhatsApp");
+            return;
+        }
+
+        if (command.equals("open youtube")
+                || command.equals("youtube")) {
+
+            openApp(
+                    "com.google.android.youtube",
+                    "YouTube"
+            );
+            return;
+        }
+
+        if (command.equals("open settings")
+                || command.equals("settings")) {
+
+            openSettings();
+            return;
+        }
+
+        if (command.equals("open camera")
+                || command.equals("camera")) {
+
+            openCamera();
+            return;
+        }
+
+        if (command.equals("hello")
+                || command.equals("hi")
+                || command.equals("hello pai")) {
 
             speakResponse(
                     "Hello! I am P AI System Manager. "
-                    + "How can I help you?"
+                    + "How can I help you today?"
             );
+            return;
+        }
 
-        } else if (command.contains("your name")) {
+        if (command.contains("your name")) {
             speakResponse(
                     "My name is P AI System Manager."
             );
+            return;
+        }
 
-        } else if (command.contains("lock")) {
+        askGemini(originalCommand);
+    }
+
+    private void askGemini(String question) {
+        if (aiModel == null) {
             speakResponse(
-                    "Screen locking is not implemented yet."
+                    "The AI service could not initialize. "
+                    + "Please check your Firebase configuration."
+            );
+            return;
+        }
+
+        if (requestRunning) {
+            Toast.makeText(
+                    this,
+                    "Please wait for the current answer.",
+                    Toast.LENGTH_SHORT
+            ).show();
+            return;
+        }
+
+        requestRunning = true;
+        executeButton.setEnabled(false);
+        responseText.setText("P AI is thinking...");
+
+        Content prompt = new Content.Builder()
+                .addText(
+                        "You are P AI System Manager, a helpful "
+                        + "Android assistant. Answer clearly and "
+                        + "accurately. Do not claim to perform "
+                        + "phone actions unless the app actually "
+                        + "supports them.\n\nUser: "
+                        + question
+                )
+                .build();
+
+        try {
+            ListenableFuture<GenerateContentResponse> future =
+                    aiModel.generateContent(prompt);
+
+            Futures.addCallback(
+                    future,
+                    new FutureCallback<GenerateContentResponse>() {
+
+                        @Override
+                        public void onSuccess(
+                                GenerateContentResponse result) {
+
+                            requestRunning = false;
+                            executeButton.setEnabled(true);
+
+                            String answer = result.getText();
+
+                            if (answer == null
+                                    || answer.trim().isEmpty()) {
+
+                                speakResponse(
+                                        "I couldn't generate an answer. "
+                                        + "Please try another question."
+                                );
+
+                            } else {
+                                speakResponse(answer.trim());
+                            }
+                        }
+
+                        @Override
+                        public void onFailure(Throwable error) {
+                            requestRunning = false;
+                            executeButton.setEnabled(true);
+
+                            speakResponse(
+                                    "I couldn't reach the AI service. "
+                                    + "Check your internet connection "
+                                    + "and Firebase AI Logic configuration."
+                            );
+                        }
+                    },
+                    mainExecutor
             );
 
-        } else {
+        } catch (Exception exception) {
+            requestRunning = false;
+            executeButton.setEnabled(true);
+
             speakResponse(
-                    "Command not recognized. Try WhatsApp, "
-                    + "YouTube, Settings, or Camera."
+                    "An error occurred while sending your question."
             );
         }
     }
@@ -272,7 +432,7 @@ public class MainActivity extends Activity {
                 startActivity(intent);
             } else {
                 speakResponse(
-                        appName + " is unavailable or not installed."
+                        appName + " is not installed or unavailable."
                 );
             }
 
@@ -285,9 +445,9 @@ public class MainActivity extends Activity {
         try {
             speakResponse("Opening Settings.");
 
-            startActivity(new Intent(
-                    Settings.ACTION_SETTINGS
-            ));
+            startActivity(
+                    new Intent(Settings.ACTION_SETTINGS)
+            );
 
         } catch (Exception exception) {
             speakResponse("Unable to open Settings.");
@@ -296,11 +456,19 @@ public class MainActivity extends Activity {
 
     private void openCamera() {
         try {
-            speakResponse("Opening Camera.");
-
-            startActivity(new Intent(
+            Intent intent = new Intent(
                     "android.media.action.IMAGE_CAPTURE"
-            ));
+            );
+
+            if (intent.resolveActivity(
+                    getPackageManager()) != null) {
+
+                speakResponse("Opening Camera.");
+                startActivity(intent);
+
+            } else {
+                speakResponse("No camera application was found.");
+            }
 
         } catch (Exception exception) {
             speakResponse("Unable to open Camera.");
