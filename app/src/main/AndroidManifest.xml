@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
-        
+        android:name=".PAIApplication"
         android:allowBackup="false"
         android:label="P AI System Manager"
         android:theme="@android:style/Theme.Material.NoActionBar"
