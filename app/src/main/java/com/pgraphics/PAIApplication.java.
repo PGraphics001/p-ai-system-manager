@@ -25,10 +25,17 @@ public class PAIApplication extends Application {
                     DebugAppCheckProviderFactory.getInstance()
             );
 
-            Log.d(TAG, "App Check debug provider initialized.");
+            Log.i(
+                    TAG,
+                    "Firebase App Check debug provider initialized."
+            );
 
-        } catch (Exception e) {
-            Log.e(TAG, "App Check initialization failed.", e);
+        } catch (Exception exception) {
+            Log.e(
+                    TAG,
+                    "Firebase App Check initialization failed.",
+                    exception
+            );
         }
     }
 }
