@@ -8,21 +8,18 @@ android {
     compileSdk 35
 
     defaultConfig {
-    applicationId 'com.pgraphics.paisystemmanager'
-    minSdk 24
-    targetSdk 28
-    versionCode 1
-    versionName '1.0'
-}
+        applicationId 'com.pgraphics.paisystemmanager'
+        minSdk 24
+        targetSdk 28
+        versionCode 1
+        versionName '1.0'
+    }
 }
 
 dependencies {
+    // Firebase dependency management
     implementation platform('com.google.firebase:firebase-bom:35.1.0')
 
-    implementation 'com.google.firebase:firebase-ai'
+    // Retained for the existing PAIApplication.java
     implementation 'com.google.firebase:firebase-appcheck-debug'
-
-    // Required libraries for Firebase AI Logic in Java
-    implementation 'com.google.guava:guava:31.0.1-android'
-    implementation 'org.reactivestreams:reactive-streams:1.0.4'
 }
