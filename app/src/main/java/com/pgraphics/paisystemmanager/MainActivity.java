@@ -18,70 +18,61 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.google.common.util.concurrent.FutureCallback;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.firebase.ai.FirebaseAI;
-import com.google.firebase.ai.GenerativeModel;
-import com.google.firebase.ai.java.GenerativeModelFutures;
-import com.google.firebase.ai.type.Content;
-import com.google.firebase.ai.type.GenerateContentResponse;
-import com.google.firebase.ai.type.GenerativeBackend;
+import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Locale;
-import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
 
     private static final String TAG = "PAI_AI";
+
     private static final int VOICE_REQUEST_CODE = 100;
+
+    private static final String AI_API_URL =
+            "https://p-ai-system-manager-api.vercel.app/api/chat";
 
     private EditText commandInput;
     private TextView responseText;
     private Button executeButton;
 
     private TextToSpeech textToSpeech;
+
     private boolean speechReady = false;
     private boolean requestRunning = false;
 
-    private GenerativeModelFutures aiModel;
-
-    private final Executor mainExecutor =
-            command -> runOnUiThread(command);
+    private final ExecutorService aiExecutor =
+            Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         initializeSpeech();
-        initializeAI();
         createInterface();
     }
 
-    private void initializeAI() {
-        try {
-            GenerativeModel model =
-                    FirebaseAI.getInstance(
-                            GenerativeBackend.googleAI()
-                    ).generativeModel("gemini-3.5-flash");
-
-            aiModel = GenerativeModelFutures.from(model);
-
-            Log.d(TAG, "AI model initialized.");
-
-        } catch (Exception e) {
-            aiModel = null;
-
-            Log.e(TAG, "AI initialization failed.", e);
-        }
-    }
+    // ==============================
+    // SPEECH INITIALIZATION
+    // ==============================
 
     private void initializeSpeech() {
+
         textToSpeech = new TextToSpeech(
                 this,
                 status -> {
+
                     if (status == TextToSpeech.SUCCESS) {
+
                         int result = textToSpeech.setLanguage(
                                 Locale.getDefault()
                         );
@@ -98,7 +89,12 @@ public class MainActivity extends Activity {
         );
     }
 
+    // ==============================
+    // USER INTERFACE
+    // ==============================
+
     private void createInterface() {
+
         LinearLayout layout = new LinearLayout(this);
 
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -190,6 +186,7 @@ public class MainActivity extends Activity {
         );
 
         stopButton.setOnClickListener(view -> {
+
             if (textToSpeech != null) {
                 textToSpeech.stop();
             }
@@ -200,10 +197,16 @@ public class MainActivity extends Activity {
         setContentView(layout);
     }
 
+    // ==============================
+    // TEXT TO SPEECH
+    // ==============================
+
     private void speakResponse(String message) {
+
         responseText.setText(message);
 
         if (speechReady && textToSpeech != null) {
+
             textToSpeech.speak(
                     message,
                     TextToSpeech.QUEUE_FLUSH,
@@ -213,7 +216,12 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ==============================
+    // VOICE RECOGNITION
+    // ==============================
+
     private void startVoiceRecognition() {
+
         Intent intent = new Intent(
                 RecognizerIntent.ACTION_RECOGNIZE_SPEECH
         );
@@ -234,12 +242,14 @@ public class MainActivity extends Activity {
         );
 
         try {
+
             startActivityForResult(
                     intent,
                     VOICE_REQUEST_CODE
             );
 
         } catch (Exception e) {
+
             Log.e(TAG, "Speech recognition failed.", e);
 
             speakResponse(
@@ -270,13 +280,20 @@ public class MainActivity extends Activity {
                     );
 
             if (results != null && !results.isEmpty()) {
+
                 commandInput.setText(results.get(0));
+
                 executeCommand();
             }
         }
     }
 
+    // ==============================
+    // COMMAND PROCESSING
+    // ==============================
+
     private void executeCommand() {
+
         String originalCommand = commandInput.getText()
                 .toString()
                 .trim();
@@ -288,7 +305,9 @@ public class MainActivity extends Activity {
         hideKeyboard();
 
         if (command.isEmpty()) {
+
             speakResponse("Please type or speak a command.");
+
             return;
         }
 
@@ -300,6 +319,7 @@ public class MainActivity extends Activity {
             }
 
             responseText.setText("Speech stopped.");
+
             return;
         }
 
@@ -307,6 +327,7 @@ public class MainActivity extends Activity {
                 || command.equals("whatsapp")) {
 
             openApp("com.whatsapp", "WhatsApp");
+
             return;
         }
 
@@ -317,6 +338,7 @@ public class MainActivity extends Activity {
                     "com.google.android.youtube",
                     "YouTube"
             );
+
             return;
         }
 
@@ -324,6 +346,7 @@ public class MainActivity extends Activity {
                 || command.equals("settings")) {
 
             openSettings();
+
             return;
         }
 
@@ -331,6 +354,7 @@ public class MainActivity extends Activity {
                 || command.equals("camera")) {
 
             openCamera();
+
             return;
         }
 
@@ -347,6 +371,7 @@ public class MainActivity extends Activity {
         }
 
         if (command.contains("your name")) {
+
             speakResponse(
                     "My name is P AI System Manager."
             );
@@ -354,20 +379,17 @@ public class MainActivity extends Activity {
             return;
         }
 
-        askGemini(originalCommand);
+        askAI(originalCommand);
     }
 
-    private void askGemini(String question) {
-        if (aiModel == null) {
-            speakResponse(
-                    "The AI model failed to initialize. "
-                    + "Please check the Firebase setup."
-            );
+    // ==============================
+    // OPENROUTER BACKEND CONNECTION
+    // ==============================
 
-            return;
-        }
+    private void askAI(String question) {
 
         if (requestRunning) {
+
             Toast.makeText(
                     this,
                     "Please wait for the current answer.",
@@ -378,135 +400,195 @@ public class MainActivity extends Activity {
         }
 
         requestRunning = true;
+
         executeButton.setEnabled(false);
 
         responseText.setText("P AI is thinking...");
 
-        Content prompt = new Content.Builder()
-                .addText(
-                        "You are P AI System Manager, a helpful "
-                        + "Android assistant. Answer the user's "
-                        + "question clearly, accurately, and "
-                        + "usefully. If you are uncertain, say so. "
-                        + "Never claim to perform phone actions "
-                        + "unless this app actually supports them."
-                        + "\n\nUser question: "
-                        + question
-                )
-                .build();
+        aiExecutor.execute(() -> {
 
-        try {
-            ListenableFuture<GenerateContentResponse> future =
-                    aiModel.generateContent(prompt);
+            HttpURLConnection connection = null;
 
-            Futures.addCallback(
-                    future,
-                    new FutureCallback<GenerateContentResponse>() {
+            try {
 
-                        @Override
-                        public void onSuccess(
-                                GenerateContentResponse result) {
+                URL url = new URL(AI_API_URL);
 
-                            requestRunning = false;
-                            executeButton.setEnabled(true);
+                connection = (HttpURLConnection)
+                        url.openConnection();
 
-                            String answer = result.getText();
+                connection.setRequestMethod("POST");
 
-                            if (answer == null
-                                    || answer.trim().isEmpty()) {
+                connection.setConnectTimeout(20000);
 
-                                speakResponse(
-                                        "The AI returned an empty "
-                                        + "answer. Please try again."
-                                );
+                connection.setReadTimeout(60000);
 
-                            } else {
-                                speakResponse(answer.trim());
-                            }
+                connection.setDoOutput(true);
+
+                connection.setRequestProperty(
+                        "Content-Type",
+                        "application/json; charset=UTF-8"
+                );
+
+                connection.setRequestProperty(
+                        "Accept",
+                        "application/json"
+                );
+
+                JSONObject requestBody = new JSONObject();
+
+                requestBody.put("message", question);
+
+                byte[] requestBytes = requestBody.toString()
+                        .getBytes(StandardCharsets.UTF_8);
+
+                try (OutputStream output =
+                             connection.getOutputStream()) {
+
+                    output.write(requestBytes);
+                    output.flush();
+                }
+
+                int statusCode = connection.getResponseCode();
+
+                InputStream inputStream;
+
+                if (statusCode >= 200 && statusCode < 300) {
+
+                    inputStream = connection.getInputStream();
+
+                } else {
+
+                    inputStream = connection.getErrorStream();
+                }
+
+                StringBuilder responseBuilder =
+                        new StringBuilder();
+
+                if (inputStream != null) {
+
+                    try (BufferedReader reader =
+                                 new BufferedReader(
+                                         new InputStreamReader(
+                                                 inputStream,
+                                                 StandardCharsets.UTF_8
+                                         )
+                                 )) {
+
+                        String line;
+
+                        while ((line = reader.readLine()) != null) {
+
+                            responseBuilder.append(line);
                         }
+                    }
+                }
 
-                        @Override
-                        public void onFailure(Throwable error) {
-                            requestRunning = false;
-                            executeButton.setEnabled(true);
+                if (statusCode < 200 || statusCode >= 300) {
 
-                            Log.e(
-                                    TAG,
-                                    "Gemini request failed.",
-                                    error
-                            );
+                    throw new Exception(
+                            "Server returned HTTP " + statusCode
+                    );
+                }
 
-                            String details = getErrorDetails(error);
+                JSONObject responseJson =
+                        new JSONObject(
+                                responseBuilder.toString()
+                        );
 
-                            speakResponse(
-                                    "AI request failed: " + details
-                            );
-                        }
-                    },
-                    mainExecutor
-            );
+                String answer = responseJson.optString(
+                        "reply",
+                        ""
+                ).trim();
 
-        } catch (Exception e) {
-            requestRunning = false;
-            executeButton.setEnabled(true);
+                if (answer.isEmpty()) {
 
-            Log.e(TAG, "Could not submit AI request.", e);
+                    throw new Exception(
+                            "The AI returned an empty response."
+                    );
+                }
 
-            speakResponse(
-                    "Could not submit the AI request: "
-                    + getErrorDetails(e)
-            );
-        }
+                runOnUiThread(() -> {
+
+                    requestRunning = false;
+
+                    executeButton.setEnabled(true);
+
+                    if (!isFinishing() && !isDestroyed()) {
+
+                        speakResponse(answer);
+                    }
+                });
+
+            } catch (Exception e) {
+
+                Log.e(TAG, "AI request failed.", e);
+
+                String errorMessage =
+                        "AI request failed: " + e.getMessage();
+
+                runOnUiThread(() -> {
+
+                    requestRunning = false;
+
+                    executeButton.setEnabled(true);
+
+                    if (!isFinishing() && !isDestroyed()) {
+
+                        speakResponse(errorMessage);
+                    }
+                });
+
+            } finally {
+
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        });
     }
 
-    private String getErrorDetails(Throwable error) {
-        Throwable current = error;
-
-        while (current.getCause() != null
-                && current.getCause() != current) {
-            current = current.getCause();
-        }
-
-        String message = current.getMessage();
-
-        if (message == null || message.trim().isEmpty()) {
-            message = current.getClass().getSimpleName();
-        }
-
-        if (message.length() > 300) {
-            message = message.substring(0, 300);
-        }
-
-        return message;
-    }
+    // ==============================
+    // OPEN INSTALLED APPLICATIONS
+    // ==============================
 
     private void openApp(
             String packageName,
             String appName) {
 
         try {
+
             Intent intent = getPackageManager()
                     .getLaunchIntentForPackage(packageName);
 
             if (intent != null) {
+
                 speakResponse("Opening " + appName + ".");
+
                 startActivity(intent);
 
             } else {
+
                 speakResponse(
                         appName + " is not installed or unavailable."
                 );
             }
 
         } catch (Exception e) {
+
             Log.e(TAG, "Could not open " + appName, e);
 
             speakResponse("Unable to open " + appName + ".");
         }
     }
 
+    // ==============================
+    // OPEN SETTINGS
+    // ==============================
+
     private void openSettings() {
+
         try {
+
             speakResponse("Opening Settings.");
 
             startActivity(
@@ -514,14 +596,21 @@ public class MainActivity extends Activity {
             );
 
         } catch (Exception e) {
+
             Log.e(TAG, "Could not open Settings.", e);
 
             speakResponse("Unable to open Settings.");
         }
     }
 
+    // ==============================
+    // OPEN CAMERA
+    // ==============================
+
     private void openCamera() {
+
         try {
+
             Intent intent = new Intent(
                     "android.media.action.IMAGE_CAPTURE"
             );
@@ -530,20 +619,30 @@ public class MainActivity extends Activity {
                     getPackageManager()) != null) {
 
                 speakResponse("Opening Camera.");
+
                 startActivity(intent);
 
             } else {
-                speakResponse("No camera application was found.");
+
+                speakResponse(
+                        "No camera application was found."
+                );
             }
 
         } catch (Exception e) {
+
             Log.e(TAG, "Could not open Camera.", e);
 
             speakResponse("Unable to open Camera.");
         }
     }
 
+    // ==============================
+    // KEYBOARD MANAGEMENT
+    // ==============================
+
     private void hideKeyboard() {
+
         if (commandInput == null) {
             return;
         }
@@ -554,6 +653,7 @@ public class MainActivity extends Activity {
                 );
 
         if (manager != null) {
+
             manager.hideSoftInputFromWindow(
                     commandInput.getWindowToken(),
                     0
@@ -561,12 +661,21 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ==============================
+    // ACTIVITY CLEANUP
+    // ==============================
+
     @Override
     protected void onDestroy() {
+
         if (textToSpeech != null) {
+
             textToSpeech.stop();
+
             textToSpeech.shutdown();
         }
+
+        aiExecutor.shutdownNow();
 
         super.onDestroy();
     }
