@@ -36,7 +36,9 @@ import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
 
-    private static final String TAG = "PAI_MAIN";
+    // =========================================
+    // CONFIGURATION
+    // =========================================
 
     private static final String API_URL =
             "https://p-ai-system-manager-api.vercel.app/api/chat";
@@ -44,15 +46,25 @@ public class MainActivity extends Activity {
     private static final int PERMISSION_REQUEST_CODE = 1001;
     private static final int VOICE_REQUEST_CODE = 2001;
 
+    // =========================================
+    // USER INTERFACE
+    // =========================================
+
     private LinearLayout mainLayout;
     private LinearLayout chatLayout;
 
     private EditText messageInput;
     private TextView statusText;
+    private ScrollView chatScrollView;
+
+    // =========================================
+    // APPLICATION SERVICES
+    // =========================================
 
     private TextToSpeech textToSpeech;
 
     private boolean ttsReady = false;
+    private boolean activityDestroyed = false;
 
     private final ExecutorService aiExecutor =
             Executors.newSingleThreadExecutor();
@@ -70,20 +82,36 @@ public class MainActivity extends Activity {
         requestRequiredPermissions();
     }
 
+    @Override
+    protected void onDestroy() {
+
+        activityDestroyed = true;
+
+        if (textToSpeech != null) {
+            textToSpeech.stop();
+            textToSpeech.shutdown();
+            textToSpeech = null;
+        }
+
+        aiExecutor.shutdownNow();
+
+        super.onDestroy();
+    }
+
     // =========================================
     // USER INTERFACE
     // =========================================
 
     private void createInterface() {
 
-        ScrollView scrollView = new ScrollView(this);
+        chatScrollView = new ScrollView(this);
 
         mainLayout = new LinearLayout(this);
         mainLayout.setOrientation(LinearLayout.VERTICAL);
         mainLayout.setPadding(20, 24, 20, 24);
         mainLayout.setBackgroundColor(0xFF101820);
 
-        scrollView.addView(mainLayout);
+        chatScrollView.addView(mainLayout);
 
         TextView title = new TextView(this);
         title.setText("P AI SYSTEM MANAGER");
@@ -169,7 +197,7 @@ public class MainActivity extends Activity {
                 v -> stopSpeaking()
         );
 
-        setContentView(scrollView);
+        setContentView(chatScrollView);
     }
 
     private void addButton(
@@ -197,7 +225,6 @@ public class MainActivity extends Activity {
         params.setMargins(0, 8, 0, 8);
 
         mainLayout.addView(button, params);
-
         button.setOnClickListener(listener);
     }
 
@@ -223,6 +250,30 @@ public class MainActivity extends Activity {
         params.setMargins(0, 5, 0, 5);
 
         chatLayout.addView(textView, params);
+
+        chatScrollView.post(
+                () -> chatScrollView.fullScroll(View.FOCUS_DOWN)
+        );
+    }
+
+    // =========================================
+    // STATUS DISPLAY
+    // =========================================
+
+    private void updateStatus(String message) {
+
+        if (activityDestroyed) {
+            return;
+        }
+
+        runOnUiThread(() -> {
+
+            if (activityDestroyed || statusText == null) {
+                return;
+            }
+
+            statusText.setText("Status: " + message);
+        });
     }
 
     // =========================================
@@ -235,6 +286,10 @@ public class MainActivity extends Activity {
                 this,
                 status -> {
 
+                    if (activityDestroyed || textToSpeech == null) {
+                        return;
+                    }
+
                     if (status == TextToSpeech.SUCCESS) {
 
                         int result = textToSpeech.setLanguage(
@@ -244,6 +299,9 @@ public class MainActivity extends Activity {
                         ttsReady =
                                 result != TextToSpeech.LANG_MISSING_DATA
                                 && result != TextToSpeech.LANG_NOT_SUPPORTED;
+
+                    } else {
+                        ttsReady = false;
                     }
                 }
         );
@@ -315,25 +373,26 @@ public class MainActivity extends Activity {
                 grantResults
         );
 
-        if (requestCode == PERMISSION_REQUEST_CODE) {
+        if (requestCode != PERMISSION_REQUEST_CODE) {
+            return;
+        }
 
-            boolean microphoneGranted = false;
+        boolean microphoneGranted = false;
 
-            for (int i = 0; i < permissions.length; i++) {
+        for (int i = 0; i < permissions.length; i++) {
 
-                if (Manifest.permission.RECORD_AUDIO.equals(
-                        permissions[i]
-                ) && grantResults[i] == PackageManager.PERMISSION_GRANTED) {
+            if (Manifest.permission.RECORD_AUDIO.equals(permissions[i])
+                    && i < grantResults.length
+                    && grantResults[i] == PackageManager.PERMISSION_GRANTED) {
 
-                    microphoneGranted = true;
-                }
+                microphoneGranted = true;
             }
+        }
 
-            if (microphoneGranted) {
-                updateStatus("Microphone permission granted.");
-            } else {
-                updateStatus("Microphone permission is required.");
-            }
+        if (microphoneGranted) {
+            updateStatus("Microphone permission granted.");
+        } else {
+            updateStatus("Microphone permission is required.");
         }
     }
 
@@ -502,7 +561,7 @@ public class MainActivity extends Activity {
 
     private void processPhoneCommand(String command) {
 
-        if (command == null) {
+        if (command == null || command.trim().isEmpty()) {
             return;
         }
 
@@ -576,7 +635,8 @@ public class MainActivity extends Activity {
 
             addChatMessage(
                     "P AI",
-                    "I could not find " + applicationName + " on your phone."
+                    "I could not find " + applicationName
+                            + " on your phone."
             );
 
         } catch (Exception exception) {
@@ -615,139 +675,58 @@ public class MainActivity extends Activity {
 
         updateStatus("P AI is thinking...");
 
-        aiExecutor.execute(() -> {
+        try {
 
-            HttpURLConnection connection = null;
+            aiExecutor.execute(() -> {
 
-            try {
+                HttpURLConnection connection = null;
 
-                URL url = new URL(API_URL);
+                try {
 
-                connection = (HttpURLConnection) url.openConnection();
+                    URL url = new URL(API_URL);
 
-                connection.setRequestMethod("POST");
-                connection.setConnectTimeout(20000);
-                connection.setReadTimeout(30000);
-                connection.setDoOutput(true);
+                    connection =
+                            (HttpURLConnection) url.openConnection();
 
-                connection.setRequestProperty(
-                        "Content-Type",
-                        "application/json; charset=UTF-8"
-                );
+                    connection.setRequestMethod("POST");
+                    connection.setConnectTimeout(20000);
+                    connection.setReadTimeout(30000);
+                    connection.setDoOutput(true);
 
-                connection.setRequestProperty(
-                        "Accept",
-                        "application/json"
-                );
-
-                JSONObject requestBody = new JSONObject();
-
-                requestBody.put("message", question);
-
-                byte[] requestBytes =
-                        requestBody.toString().getBytes(
-                                StandardCharsets.UTF_8
-                        );
-
-                try (OutputStream outputStream =
-                             connection.getOutputStream()) {
-
-                    outputStream.write(requestBytes);
-                    outputStream.flush();
-                }
-
-                int responseCode = connection.getResponseCode();
-
-                InputStream inputStream;
-
-                if (responseCode >= 200 && responseCode < 300) {
-                    inputStream = connection.getInputStream();
-                } else {
-                    inputStream = connection.getErrorStream();
-                }
-
-                if (inputStream == null) {
-                    throw new Exception("The AI server returned no response.");
-                }
-
-                StringBuilder response = new StringBuilder();
-
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(
-                                inputStream,
-                                StandardCharsets.UTF_8
-                        )
-                )) {
-
-                    String line;
-
-                    while ((line = reader.readLine()) != null) {
-                        response.append(line);
-                    }
-                }
-
-                if (responseCode < 200 || responseCode >= 300) {
-                    throw new Exception(
-                            "AI server error: " + responseCode
-                    );
-                }
-
-                JSONObject jsonResponse =
-                        new JSONObject(response.toString());
-
-                String reply = jsonResponse.optString(
-                        "reply",
-                        ""
-                ).trim();
-
-                if (reply.isEmpty()) {
-                    throw new Exception("The AI returned an empty answer.");
-                }
-
-                runOnUiThread(() -> {
-
-                    if (isFinishing() || isDestroyed()) {
-                        return;
-                    }
-
-                    addChatMessage("P AI", reply);
-
-                    updateStatus("Ready");
-
-                    speak(reply);
-                });
-
-                        } catch (Exception exception) {
-
-                String errorMessage = exception.getMessage();
-
-                if (errorMessage == null || errorMessage.trim().isEmpty()) {
-                    errorMessage = "Please check your internet connection and try again.";
-                }
-
-                final String finalErrorMessage = errorMessage;
-
-                runOnUiThread(() -> {
-
-                    if (isFinishing() || isDestroyed()) {
-                        return;
-                    }
-
-                    addChatMessage(
-                            "P AI",
-                            "Sorry, I couldn't complete your request. "
-                                    + finalErrorMessage
+                    connection.setRequestProperty(
+                            "Content-Type",
+                            "application/json; charset=UTF-8"
                     );
 
-                    updateStatus("AI connection failed.");
-                });
+                    connection.setRequestProperty(
+                            "Accept",
+                            "application/json"
+                    );
 
-            } finally {
+                    JSONObject requestBody = new JSONObject();
+                    requestBody.put("message", question);
 
-                if (connection != null) {
-                    connection.disconnect();
-                }
-            }
-        });
-    }
-}
+                    byte[] requestBytes =
+                            requestBody.toString().getBytes(
+                                    StandardCharsets.UTF_8
+                            );
+
+                    try (OutputStream outputStream =
+                                 connection.getOutputStream()) {
+
+                        outputStream.write(requestBytes);
+                        outputStream.flush();
+                    }
+
+                    int responseCode = connection.getResponseCode();
+
+                    InputStream inputStream;
+
+                    if (responseCode >= 200 && responseCode < 300) {
+                        inputStream = connection.getInputStream();
+                    } else {
+                        inputStream = connection.getErrorStream();
+                    }
+
+                    if (inputStream == null) {
+                        throw new Excepti
