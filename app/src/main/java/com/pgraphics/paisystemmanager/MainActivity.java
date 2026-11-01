@@ -53,14 +53,14 @@ public class MainActivity extends Activity {
 
     private boolean speechReady = false;
     private boolean requestRunning = false;
-    private boolean permissionRequestPending = false;
+    private boolean activityDestroyed = false;
 
     private final ExecutorService aiExecutor =
             Executors.newSingleThreadExecutor();
 
-    // ==================================================
+    // ================================================
     // ACTIVITY LIFECYCLE
-    // ==================================================
+    // ================================================
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -70,9 +70,9 @@ public class MainActivity extends Activity {
         initializeSpeech();
     }
 
-    // ==================================================
+    // ================================================
     // USER INTERFACE
-    // ==================================================
+    // ================================================
 
     private void createInterface() {
 
@@ -148,8 +148,8 @@ public class MainActivity extends Activity {
                 + "• Open YouTube\n"
                 + "• Open Settings\n"
                 + "• Open Camera\n\n"
-                + "Start background listening to activate "
-                + "the offline voice assistant."
+                + "You can also ask P AI questions "
+                + "when connected to the internet."
         );
 
         responseText.setTextColor(Color.WHITE);
@@ -209,15 +209,19 @@ public class MainActivity extends Activity {
         return button;
     }
 
-    // ==================================================
+    // ================================================
     // TEXT TO SPEECH
-    // ==================================================
+    // ================================================
 
     private void initializeSpeech() {
 
         textToSpeech = new TextToSpeech(
                 this,
                 status -> {
+
+                    if (activityDestroyed) {
+                        return;
+                    }
 
                     if (status == TextToSpeech.SUCCESS
                             && textToSpeech != null) {
@@ -236,7 +240,10 @@ public class MainActivity extends Activity {
 
                     } else {
 
-                        Log.e(TAG, "Text-to-speech initialization failed.");
+                        Log.e(
+                                TAG,
+                                "Text-to-speech initialization failed."
+                        );
                     }
                 }
         );
@@ -244,7 +251,7 @@ public class MainActivity extends Activity {
 
     private void speakResponse(String message) {
 
-        if (isFinishing() || isDestroyed()) {
+        if (activityDestroyed || isFinishing() || isDestroyed()) {
             return;
         }
 
@@ -261,9 +268,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ==================================================
+    // ================================================
     // PERMISSIONS
-    // ==================================================
+    // ================================================
 
     private void requestVoicePermissions() {
 
@@ -289,8 +296,6 @@ public class MainActivity extends Activity {
             return;
         }
 
-        permissionRequestPending = true;
-
         requestPermissions(
                 permissions.toArray(new String[0]),
                 PERMISSION_REQUEST_CODE
@@ -314,8 +319,6 @@ public class MainActivity extends Activity {
             return;
         }
 
-        permissionRequestPending = false;
-
         boolean microphoneGranted =
                 checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                         == PackageManager.PERMISSION_GRANTED;
@@ -333,9 +336,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ==================================================
+    // ================================================
     // BACKGROUND VOICE SERVICE
-    // ==================================================
+    // ================================================
 
     private void startBackgroundListening() {
 
@@ -372,7 +375,11 @@ public class MainActivity extends Activity {
 
         } catch (Exception exception) {
 
-            Log.e(TAG, "Unable to start voice service.", exception);
+            Log.e(
+                    TAG,
+                    "Unable to start voice service.",
+                    exception
+            );
 
             speakResponse(
                     "Unable to start background voice recognition."
@@ -399,15 +406,19 @@ public class MainActivity extends Activity {
 
         } catch (Exception exception) {
 
-            Log.e(TAG, "Unable to stop voice service.", exception);
+            Log.e(
+                    TAG,
+                    "Unable to stop voice service.",
+                    exception
+            );
 
             speakResponse("Unable to stop background listening.");
         }
     }
 
-    // ==================================================
+    // ================================================
     // MANUAL VOICE INPUT
-    // ==================================================
+    // ================================================
 
     private void startManualVoiceRecognition() {
 
@@ -439,7 +450,11 @@ public class MainActivity extends Activity {
 
         } catch (Exception exception) {
 
-            Log.e(TAG, "Manual voice recognition failed.", exception);
+            Log.e(
+                    TAG,
+                    "Manual voice recognition failed.",
+                    exception
+            );
 
             speakResponse(
                     "Speech recognition is unavailable."
@@ -478,11 +493,15 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ==================================================
+    // ================================================
     // COMMAND PROCESSING
-    // ==================================================
+    // ================================================
 
     private void executeCommand() {
+
+        if (activityDestroyed) {
+            return;
+        }
 
         String originalCommand = commandInput.getText()
                 .toString()
@@ -567,9 +586,9 @@ public class MainActivity extends Activity {
         askAI(originalCommand);
     }
 
-    // ==================================================
+    // ================================================
     // ONLINE AI CONNECTION
-    // ==================================================
+    // ================================================
 
     private void askAI(String question) {
 
@@ -590,158 +609,128 @@ public class MainActivity extends Activity {
 
         responseText.setText("P AI is thinking...");
 
-        aiExecutor.execute(() -> {
-
-            HttpURLConnection connection = null;
-
-            try {
-
-                URL url = new URL(AI_API_URL);
-
-                connection = (HttpURLConnection)
-                        url.openConnection();
-
-                connection.setRequestMethod("POST");
-                connection.setConnectTimeout(20000);
-                connection.setReadTimeout(60000);
-                connection.setDoOutput(true);
-
-                connection.setRequestProperty(
-                        "Content-Type",
-                        "application/json; charset=UTF-8"
-                );
-
-                connection.setRequestProperty(
-                        "Accept",
-                        "application/json"
-                );
-
-                JSONObject requestBody = new JSONObject();
-
-                requestBody.put("message", question);
-
-                byte[] requestBytes = requestBody.toString()
-                        .getBytes(StandardCharsets.UTF_8);
-
-                try (OutputStream output =
-                             connection.getOutputStream()) {
-
-                    output.write(requestBytes);
-                    output.flush();
-                }
-
-                int statusCode = connection.getResponseCode();
-
-                InputStream inputStream =
-                        statusCode >= 200 && statusCode < 300
-                                ? connection.getInputStream()
-                                : connection.getErrorStream();
-
-                StringBuilder responseBuilder =
-                        new StringBuilder();
-
-                if (inputStream != null) {
-
-                    try (BufferedReader reader =
-                                 new BufferedReader(
-                                         new InputStreamReader(
-                                                 inputStream,
-                                                 StandardCharsets.UTF_8
-                                         )
-                                 )) {
-
-                        String line;
-
-                        while ((line = reader.readLine()) != null) {
-                            responseBuilder.append(line);
-                        }
-                    }
-                }
-
-                if (statusCode < 200 || statusCode >= 300) {
-
-                    throw new Exception(
-                            "Server returned HTTP " + statusCode
-                    );
-                }
-
-                JSONObject responseJson =
-                        new JSONObject(responseBuilder.toString());
-
-                String answer = responseJson.optString(
-                        "reply",
-                        ""
-                ).trim();
-
-                if (answer.isEmpty()) {
-
-                    throw new Exception(
-                            "The AI returned an empty response."
-                    );
-                }
-
-                runOnUiThread(() -> {
-
-                    requestRunning = false;
-                    executeButton.setEnabled(true);
-
-                    speakResponse(answer);
-                });
-
-            } catch (Exception exception) {
-
-                Log.e(TAG, "AI request failed.", exception);
-
-                String errorMessage =
-                        "AI request failed: " + exception.getMessage();
-
-                runOnUiThread(() -> {
-
-                    requestRunning = false;
-                    executeButton.setEnabled(true);
-
-                    speakResponse(errorMessage);
-                });
-
-            } finally {
-
-                if (connection != null) {
-                    connection.disconnect();
-                }
-            }
-        });
-    }
-
-    // ==================================================
-    // APPLICATION LAUNCHING
-    // ==================================================
-
-    private void openApp(String packageName, String appName) {
-
         try {
 
-            Intent intent = getPackageManager()
-                    .getLaunchIntentForPackage(packageName);
+            aiExecutor.execute(() -> {
 
-            if (intent != null) {
+                HttpURLConnection connection = null;
 
-                speakResponse("Opening " + appName + ".");
+                try {
 
-                startActivity(intent);
+                    URL url = new URL(AI_API_URL);
 
-            } else {
+                    connection = (HttpURLConnection)
+                            url.openConnection();
 
-                speakResponse(
-                        appName + " is not installed or unavailable."
-                );
-            }
+                    connection.setRequestMethod("POST");
+                    connection.setConnectTimeout(20000);
+                    connection.setReadTimeout(60000);
+                    connection.setDoOutput(true);
 
-        } catch (Exception exception) {
+                    connection.setRequestProperty(
+                            "Content-Type",
+                            "application/json; charset=UTF-8"
+                    );
 
-            Log.e(TAG, "Unable to open " + appName, exception);
+                    connection.setRequestProperty(
+                            "Accept",
+                            "application/json"
+                    );
 
-            speakResponse("Unable to open " + appName + ".");
-        }
-    }
+                    JSONObject requestBody = new JSONObject();
 
-    private voi
+                    requestBody.put("message", question);
+
+                    byte[] requestBytes = requestBody.toString()
+                            .getBytes(StandardCharsets.UTF_8);
+
+                    try (OutputStream output =
+                                 connection.getOutputStream()) {
+
+                        output.write(requestBytes);
+                        output.flush();
+                    }
+
+                    int statusCode = connection.getResponseCode();
+
+                    InputStream inputStream =
+                            statusCode >= 200 && statusCode < 300
+                                    ? connection.getInputStream()
+                                    : connection.getErrorStream();
+
+                    StringBuilder responseBuilder =
+                            new StringBuilder();
+
+                    if (inputStream != null) {
+
+                        try (BufferedReader reader =
+                                     new BufferedReader(
+                                             new InputStreamReader(
+                                                     inputStream,
+                                                     StandardCharsets.UTF_8
+                                             )
+                                     )) {
+
+                            String line;
+
+                            while ((line = reader.readLine()) != null) {
+                                responseBuilder.append(line);
+                            }
+                        }
+                    }
+
+                    if (statusCode < 200 || statusCode >= 300) {
+
+                        throw new Exception(
+                                "Server returned HTTP " + statusCode
+                        );
+                    }
+
+                    JSONObject responseJson =
+                            new JSONObject(responseBuilder.toString());
+
+                    String answer = responseJson.optString(
+                            "reply",
+                            ""
+                    ).trim();
+
+                    if (answer.isEmpty()) {
+
+                        throw new Exception(
+                                "The AI returned an empty response."
+                        );
+                    }
+
+                    final String finalAnswer = answer;
+
+                    runOnUiThread(() -> {
+
+                        if (activityDestroyed || isFinishing()) {
+                            return;
+                        }
+
+                        requestRunning = false;
+                        executeButton.setEnabled(true);
+
+                        speakResponse(finalAnswer);
+                    });
+
+                } catch (Exception exception) {
+
+                    Log.e(
+                            TAG,
+                            "AI request failed.",
+                            exception
+                    );
+
+                    String errorMessage =
+                            "AI request failed: "
+                            + exception.getMessage();
+
+                    runOnUiThread(() -> {
+
+                        if (activityDestroyed || isFinishing()) {
+                            return;
+                        }
+
+                        
