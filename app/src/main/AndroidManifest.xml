@@ -1,7 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Network access for online AI services -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Voice recognition -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Background microphone service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <!-- Notification support -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Keep the CPU active when required by background processing -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Declare microphone as optional hardware -->
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
 
     <application
         android:name=".PAIApplication"
@@ -11,6 +32,7 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="false">
 
+        <!-- Main application screen -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
