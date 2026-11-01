@@ -1,5 +1,6 @@
 package com.pgraphics.paisystemmanager;
 
+import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -23,6 +24,8 @@ import org.vosk.android.SpeechService;
 
 import java.io.File;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class VoiceRecognitionService extends Service
         implements RecognitionListener {
@@ -35,7 +38,9 @@ public class VoiceRecognitionService extends Service
     public static final String ACTION_STOP =
             "com.pgraphics.paisystemmanager.STOP_VOICE";
 
-    private static final String CHANNEL_ID = "pai_voice_assistant";
+    private static final String CHANNEL_ID =
+            "pai_voice_assistant";
+
     private static final int NOTIFICATION_ID = 2001;
 
     private static final String WAKE_PHRASE = "hey p ai";
@@ -48,15 +53,23 @@ public class VoiceRecognitionService extends Service
 
     private Handler handler;
 
-    private boolean listening = false;
-    private boolean destroyed = false;
-    private boolean wakePhraseDetected = false;
+    private final ExecutorService installerExecutor =
+            Executors.newSingleThreadExecutor();
+
+    private volatile boolean destroyed = false;
+    private volatile boolean listening = false;
+    private volatile boolean awaitingCommand = false;
+    private volatile boolean initializationStarted = false;
 
     private final Runnable restartTask = () -> {
-        if (!destroyed && !listening) {
+        if (!destroyed && !listening && speechService != null) {
             startRecognition();
         }
     };
+
+    // --------------------------------------------------
+    // SERVICE LIFECYCLE
+    // --------------------------------------------------
 
     @Override
     public void onCreate() {
@@ -66,7 +79,7 @@ public class VoiceRecognitionService extends Service
 
         createNotificationChannel();
 
-        Log.i(TAG, "Voice service created.");
+        Log.i(TAG, "P AI voice service created.");
     }
 
     @Override
@@ -77,26 +90,65 @@ public class VoiceRecognitionService extends Service
             return START_NOT_STICKY;
         }
 
-        if (Build.VERSION.SDK_INT >= 34
-                && checkSelfPermission(
-                        android.Manifest.permission.RECORD_AUDIO
-                ) != PackageManager.PERMISSION_GRANTED) {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
 
-            Log.e(TAG, "Microphone permission not granted.");
+            Log.e(TAG, "Microphone permission has not been granted.");
+
             stopSelf();
+
             return START_NOT_STICKY;
         }
 
         try {
+
             startVoiceForeground();
-            initializeVoiceEngine();
+
+            if (!initializationStarted) {
+                initializationStarted = true;
+                installAndInitializeModel();
+            }
+
         } catch (Exception exception) {
+
             Log.e(TAG, "Unable to start voice service.", exception);
+
             stopSelf();
-            return START_NOT_STICKY;
         }
 
         return START_NOT_STICKY;
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
+
+    // --------------------------------------------------
+    // FOREGROUND NOTIFICATION
+    // --------------------------------------------------
+
+    private void createNotificationChannel() {
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID,
+                    "P AI Voice Assistant",
+                    NotificationManager.IMPORTANCE_LOW
+            );
+
+            channel.setDescription(
+                    "Displays the status of P AI background voice recognition."
+            );
+
+            NotificationManager manager =
+                    getSystemService(NotificationManager.class);
+
+            if (manager != null) {
+                manager.createNotificationChannel(channel);
+            }
+        }
     }
 
     private void startVoiceForeground() {
@@ -111,86 +163,197 @@ public class VoiceRecognitionService extends Service
                         | PendingIntent.FLAG_IMMUTABLE
         );
 
-        Notification notification =
-                new Notification.Builder(this, CHANNEL_ID)
-                        .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                        .setContentTitle("P AI System Manager")
-                        .setContentText("Offline voice assistant is listening")
-                        .setContentIntent(pendingIntent)
-                        .setOngoing(true)
-                        .setCategory(Notification.CATEGORY_SERVICE)
-                        .build();
+        Notification notification = buildNotification(
+                "Preparing offline voice assistant...",
+                pendingIntent
+        );
 
-        if (Build.VERSION.SDK_INT >= 29) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+
             startForeground(
                     NOTIFICATION_ID,
                     notification,
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             );
+
         } else {
+
             startForeground(NOTIFICATION_ID, notification);
         }
     }
 
-    private void createNotificationChannel() {
+    private Notification buildNotification(
+            String message,
+            PendingIntent pendingIntent
+    ) {
+
+        Notification.Builder builder;
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-
-            NotificationChannel channel = new NotificationChannel(
-                    CHANNEL_ID,
-                    "P AI Voice Assistant",
-                    NotificationManager.IMPORTANCE_LOW
-            );
-
-            channel.setDescription(
-                    "Shows when P AI background voice recognition is active."
-            );
-
-            NotificationManager manager =
-                    getSystemService(NotificationManager.class);
-
-            if (manager != null) {
-                manager.createNotificationChannel(channel);
-            }
+            builder = new Notification.Builder(this, CHANNEL_ID);
+        } else {
+            builder = new Notification.Builder(this);
         }
+
+        builder
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setContentTitle("P AI System Manager")
+                .setContentText(message)
+                .setOngoing(true)
+                .setCategory(Notification.CATEGORY_SERVICE);
+
+        if (pendingIntent != null) {
+            builder.setContentIntent(pendingIntent);
+        }
+
+        return builder.build();
     }
 
-    private void initializeVoiceEngine() {
+    private void updateNotification(String message) {
 
-        if (model != null || destroyed) {
+        if (destroyed) {
             return;
         }
 
-        File modelDirectory = new File(
-                getFilesDir(),
-                "model-en-us"
+        Intent openIntent = new Intent(this, MainActivity.class);
+
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT
+                        | PendingIntent.FLAG_IMMUTABLE
         );
 
-        if (!modelDirectory.isDirectory()) {
-            Log.e(TAG, "Vosk model directory is missing.");
-            stopSelf();
-            return;
-        }
+        Notification notification = buildNotification(
+                message,
+                pendingIntent
+        );
 
-        try {
-            model = new Model(modelDirectory.getAbsolutePath());
+        NotificationManager manager =
+                getSystemService(NotificationManager.class);
 
-            recognizer = new Recognizer(model, 16000.0f);
-
-            speechService = new SpeechService(
-                    recognizer,
-                    16000.0f
-            );
-
-            startRecognition();
-
-            Log.i(TAG, "Offline voice engine initialized.");
-
-        } catch (Exception exception) {
-            Log.e(TAG, "Vosk initialization failed.", exception);
-            stopSelf();
+        if (manager != null) {
+            manager.notify(NOTIFICATION_ID, notification);
         }
     }
+
+    // --------------------------------------------------
+    // OFFLINE MODEL INSTALLATION
+    // --------------------------------------------------
+
+    private void installAndInitializeModel() {
+
+        installerExecutor.execute(() -> {
+
+            try {
+
+                if (destroyed) {
+                    return;
+                }
+
+                updateNotification("Checking offline speech model...");
+
+                File modelDirectory =
+                        OfflineModelInstaller.install(
+                                getApplicationContext()
+                        );
+
+                if (destroyed) {
+                    return;
+                }
+
+                if (modelDirectory == null
+                        || !modelDirectory.isDirectory()) {
+
+                    throw new IllegalStateException(
+                            "Offline model directory is unavailable."
+                    );
+                }
+
+                Log.i(
+                        TAG,
+                        "Model directory: "
+                                + modelDirectory.getAbsolutePath()
+                );
+
+                updateNotification("Loading offline speech engine...");
+
+                Model loadedModel = new Model(
+                        modelDirectory.getAbsolutePath()
+                );
+
+                if (destroyed) {
+                    loadedModel.close();
+                    return;
+                }
+
+                Recognizer loadedRecognizer =
+                        new Recognizer(loadedModel, 16000.0f);
+
+                if (destroyed) {
+                    loadedRecognizer.close();
+                    loadedModel.close();
+                    return;
+                }
+
+                SpeechService loadedSpeechService =
+                        new SpeechService(
+                                loadedRecognizer,
+                                16000.0f
+                        );
+
+                if (destroyed) {
+                    loadedSpeechService.shutdown();
+                    loadedRecognizer.close();
+                    loadedModel.close();
+                    return;
+                }
+
+                model = loadedModel;
+                recognizer = loadedRecognizer;
+                speechService = loadedSpeechService;
+
+                handler.post(() -> {
+
+                    if (!destroyed) {
+
+                        updateNotification(
+                                "Offline voice assistant is listening."
+                        );
+
+                        startRecognition();
+                    }
+                });
+
+                Log.i(TAG, "Offline speech engine initialized.");
+
+            } catch (Exception exception) {
+
+                Log.e(
+                        TAG,
+                        "Offline model installation or initialization failed.",
+                        exception
+                );
+
+                handler.post(() -> {
+
+                    if (!destroyed) {
+
+                        updateNotification(
+                                "Voice setup failed. Open P AI to retry."
+                        );
+
+                        stopSelf();
+                    }
+                });
+            }
+        });
+    }
+
+    // --------------------------------------------------
+    // SPEECH RECOGNITION
+    // --------------------------------------------------
 
     private void startRecognition() {
 
@@ -199,17 +362,18 @@ public class VoiceRecognitionService extends Service
         }
 
         try {
-            wakePhraseDetected = false;
+
             listening = true;
 
             speechService.startListening(this);
 
-            Log.i(TAG, "Listening started.");
+            Log.i(TAG, "Listening for wake phrase.");
 
         } catch (Exception exception) {
+
             listening = false;
 
-            Log.e(TAG, "Could not start recognition.", exception);
+            Log.e(TAG, "Unable to start recognition.", exception);
 
             scheduleRestart();
         }
@@ -218,31 +382,21 @@ public class VoiceRecognitionService extends Service
     @Override
     public void onPartialResult(String hypothesis) {
 
-        try {
-            JSONObject result = new JSONObject(hypothesis);
-
-            String partial = result.optString("partial", "")
-                    .toLowerCase(Locale.ROOT)
-                    .trim();
-
-            if (partial.contains(WAKE_PHRASE)) {
-                wakePhraseDetected = true;
-            }
-
-        } catch (Exception exception) {
-            Log.e(TAG, "Partial result error.", exception);
-        }
+        // Partial results are deliberately not executed.
+        // Commands are processed only after final recognition.
     }
 
     @Override
     public void onResult(String hypothesis) {
-        // Intermediate recognition results are not executed.
+
+        // Intermediate results are deliberately ignored.
     }
 
     @Override
     public void onFinalResult(String hypothesis) {
 
         try {
+
             JSONObject result = new JSONObject(hypothesis);
 
             String recognizedText = result.optString("text", "")
@@ -253,50 +407,93 @@ public class VoiceRecognitionService extends Service
                 return;
             }
 
-            boolean containsWakePhrase =
-                    recognizedText.contains(WAKE_PHRASE);
+            Log.i(TAG, "Recognized speech: " + recognizedText);
 
-            if (containsWakePhrase || wakePhraseDetected) {
+            if (awaitingCommand) {
+
+                awaitingCommand = false;
+
+                executeCommand(recognizedText);
+
+            } else if (recognizedText.contains(WAKE_PHRASE)) {
 
                 String command = recognizedText
                         .replace(WAKE_PHRASE, "")
                         .trim();
 
-                wakePhraseDetected = false;
+                if (command.isEmpty()) {
 
-                if (!command.isEmpty()) {
+                    awaitingCommand = true;
+
+                    Log.i(
+                            TAG,
+                            "Wake phrase detected. Waiting for command."
+                    );
+
+                } else {
+
                     executeCommand(command);
                 }
             }
 
         } catch (Exception exception) {
-            Log.e(TAG, "Final recognition error.", exception);
+
+            Log.e(TAG, "Unable to process speech result.", exception);
 
         } finally {
+
             listening = false;
+
             scheduleRestart();
         }
     }
 
+    // --------------------------------------------------
+    // COMMAND PROCESSING
+    // --------------------------------------------------
+
     private void executeCommand(String command) {
 
-        Log.i(TAG, "Recognized command: " + command);
+        if (destroyed || command == null) {
+            return;
+        }
 
-        if (command.startsWith("open ")) {
+        String cleanedCommand = command
+                .toLowerCase(Locale.ROOT)
+                .trim();
 
-            String applicationName = command
+        Log.i(TAG, "Processing command: " + cleanedCommand);
+
+        if (cleanedCommand.startsWith("open ")) {
+
+            String applicationName = cleanedCommand
                     .substring(5)
                     .trim();
 
-            launchApplication(applicationName);
+            if (!applicationName.isEmpty()) {
+                launchApplication(applicationName);
+            }
+
+        } else {
+
+            Log.i(
+                    TAG,
+                    "No supported offline command matched: "
+                            + cleanedCommand
+            );
         }
     }
+
+    // --------------------------------------------------
+    // APPLICATION LAUNCHING
+    // --------------------------------------------------
 
     private void launchApplication(String applicationName) {
 
         PackageManager packageManager = getPackageManager();
 
         try {
+
             for (ApplicationInfo application :
                     packageManager.getInstalledApplications(
                             PackageManager.GET_META_DATA
@@ -313,27 +510,42 @@ public class VoiceRecognitionService extends Service
                                     application.packageName
                             );
 
-                    if (launchIntent != null) {
+                    if (launchIntent == null) {
 
-                        launchIntent.addFlags(
-                                Intent.FLAG_ACTIVITY_NEW_TASK
+                        Log.w(
+                                TAG,
+                                "No launch activity for: " + installedName
                         );
-
-                        startActivity(launchIntent);
-
-                        Log.i(TAG, "Opened " + installedName);
 
                         return;
                     }
+
+                    launchIntent.addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK
+                    );
+
+                    startActivity(launchIntent);
+
+                    Log.i(TAG, "Successfully opened " + installedName);
+
+                    return;
                 }
             }
 
-            Log.w(TAG, "Application not found: " + applicationName);
+            Log.w(
+                    TAG,
+                    "Installed application not found: " + applicationName
+            );
 
         } catch (Exception exception) {
+
             Log.e(TAG, "Application launch failed.", exception);
         }
     }
+
+    // --------------------------------------------------
+    // RECOGNITION RESTART
+    // --------------------------------------------------
 
     private void scheduleRestart() {
 
@@ -355,20 +567,23 @@ public class VoiceRecognitionService extends Service
         Log.e(TAG, "Speech recognition error.", exception);
 
         listening = false;
+
         scheduleRestart();
     }
 
     @Override
     public void onTimeout() {
 
+        Log.i(TAG, "Speech recognition timed out.");
+
         listening = false;
+
         scheduleRestart();
     }
 
-    @Override
-    public IBinder onBind(Intent intent) {
-        return null;
-    }
+    // --------------------------------------------------
+    // RESOURCE CLEANUP
+    // --------------------------------------------------
 
     @Override
     public void onDestroy() {
@@ -379,25 +594,33 @@ public class VoiceRecognitionService extends Service
             handler.removeCallbacksAndMessages(null);
         }
 
+        installerExecutor.shutdownNow();
+
         if (speechService != null) {
+
             speechService.stop();
             speechService.shutdown();
+
             speechService = null;
         }
 
         if (recognizer != null) {
+
             recognizer.close();
+
             recognizer = null;
         }
 
         if (model != null) {
+
             model.close();
+
             model = null;
         }
 
         listening = false;
 
-        Log.i(TAG, "Voice service stopped.");
+        Log.i(TAG, "P AI voice service destroyed.");
 
         super.onDestroy();
     }
