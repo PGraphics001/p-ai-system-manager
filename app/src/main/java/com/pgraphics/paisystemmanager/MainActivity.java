@@ -717,9 +717,37 @@ public class MainActivity extends Activity {
                     speak(reply);
                 });
 
-            } catch (Exception exception) {
+                        } catch (Exception exception) {
 
                 String errorMessage = exception.getMessage();
 
-                if (errorMessage == null || errorMessage.isEmpty()) {
-                    errorMessage = "Check you
+                if (errorMessage == null || errorMessage.trim().isEmpty()) {
+                    errorMessage = "Please check your internet connection and try again.";
+                }
+
+                final String finalErrorMessage = errorMessage;
+
+                runOnUiThread(() -> {
+
+                    if (isFinishing() || isDestroyed()) {
+                        return;
+                    }
+
+                    addChatMessage(
+                            "P AI",
+                            "Sorry, I couldn't complete your request. "
+                                    + finalErrorMessage
+                    );
+
+                    updateStatus("AI connection failed.");
+                });
+
+            } finally {
+
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        });
+    }
+}
