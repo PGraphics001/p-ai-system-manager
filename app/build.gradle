@@ -1,6 +1,5 @@
 plugins {
     id 'com.android.application'
-    id 'com.google.gms.google-services'
 }
 
 android {
@@ -9,17 +8,31 @@ android {
 
     defaultConfig {
         applicationId 'com.pgraphics.paisystemmanager'
+
         minSdk 24
         targetSdk 28
-        versionCode 1
-        versionName '1.0'
+
+        versionCode 2
+        versionName '1.1'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        debug {
+            debuggable true
+        }
+
+        release {
+            minifyEnabled false
+        }
     }
 }
 
 dependencies {
-    // Firebase dependency management
-    implementation platform('com.google.firebase:firebase-bom:35.1.0')
-
-    // Retained for the existing PAIApplication.java
-    implementation 'com.google.firebase:firebase-appcheck-debug'
+    // Offline speech recognition
+    implementation 'com.alphacephei:vosk-android:0.3.75'
 }
