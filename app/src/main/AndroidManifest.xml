@@ -2,27 +2,35 @@
 
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Network access for online AI services -->
+    <!-- Internet connectivity -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Voice recognition -->
+    <!-- Microphone access -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Background microphone service -->
+    <!-- Foreground service permissions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
-    <!-- Notification support -->
+    <!-- Notification permission -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Keep the CPU active when required by background processing -->
+    <!-- CPU wake lock -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Declare microphone as optional hardware -->
+    <!-- Microphone hardware is optional -->
     <uses-feature
         android:name="android.hardware.microphone"
         android:required="false" />
+
+    <!-- Allow discovery of launchable installed applications -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:name=".PAIApplication"
@@ -32,7 +40,7 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="false">
 
-        <!-- Main application screen -->
+        <!-- Main application activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -43,6 +51,13 @@
             </intent-filter>
 
         </activity>
+
+        <!-- Background voice recognition service -->
+        <service
+            android:name=".VoiceRecognitionService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
     </application>
 
