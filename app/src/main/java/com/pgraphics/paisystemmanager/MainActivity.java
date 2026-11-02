@@ -5,20 +5,17 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.content.res.ColorStateList;
 import android.os.Build;
 import android.os.Bundle;
 import android.speech.RecognizerIntent;
-import android.speech.SpeechRecognizer;
+import android.speech.tts.TextToSpeech;
 import android.view.Gravity;
-import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.speech.tts.TextToSpeech;
 
 import org.json.JSONObject;
 
@@ -33,45 +30,38 @@ import java.util.ArrayList;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 public class MainActivity extends Activity {
 
-    // =========================================
-    // CONFIGURATION
-    // =========================================
+    private static final String TAG = "PAI_SYSTEM_MANAGER";
 
     private static final String API_URL =
             "https://p-ai-system-manager-api.vercel.app/api/chat";
 
-    private static final int PERMISSION_REQUEST_CODE = 1001;
+    private static final String ACTION_START_VOICE =
+            "com.pgraphics.paisystemmanager.START_VOICE";
+
+    private static final String ACTION_STOP_VOICE =
+            "com.pgraphics.paisystemmanager.STOP_VOICE";
+
     private static final int VOICE_REQUEST_CODE = 2001;
+    private static final int PERMISSION_REQUEST_CODE = 1001;
 
-    // =========================================
-    // USER INTERFACE
-    // =========================================
-
-    private LinearLayout mainLayout;
     private LinearLayout chatLayout;
-
     private EditText messageInput;
     private TextView statusText;
     private ScrollView chatScrollView;
-
-    // =========================================
-    // APPLICATION SERVICES
-    // =========================================
+    private Button sendButton;
 
     private TextToSpeech textToSpeech;
 
     private boolean ttsReady = false;
     private boolean activityDestroyed = false;
+    private boolean requestInProgress = false;
 
     private final ExecutorService aiExecutor =
             Executors.newSingleThreadExecutor();
-
-    // =========================================
-    // ACTIVITY LIFECYCLE
-    // =========================================
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -79,7 +69,7 @@ public class MainActivity extends Activity {
 
         createInterface();
         initializeTextToSpeech();
-        requestRequiredPermissions();
+        requestMicrophonePermission();
     }
 
     @Override
@@ -98,148 +88,129 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    // =========================================
+    // --------------------------------------------------
     // USER INTERFACE
-    // =========================================
+    // --------------------------------------------------
 
     private void createInterface() {
 
-        chatScrollView = new ScrollView(this);
+        LinearLayout mainLayout = new LinearLayout(this);
 
-        mainLayout = new LinearLayout(this);
         mainLayout.setOrientation(LinearLayout.VERTICAL);
-        mainLayout.setPadding(20, 24, 20, 24);
-        mainLayout.setBackgroundColor(0xFF101820);
-
-        chatScrollView.addView(mainLayout);
+        mainLayout.setPadding(20, 20, 20, 20);
+        mainLayout.setBackgroundColor(0xFF101010);
 
         TextView title = new TextView(this);
+
         title.setText("P AI SYSTEM MANAGER");
-        title.setTextSize(25);
+        title.setTextSize(24);
         title.setTextColor(0xFFFFD700);
         title.setGravity(Gravity.CENTER);
-        title.setPadding(5, 20, 5, 15);
+        title.setPadding(10, 20, 10, 20);
 
         mainLayout.addView(title);
 
-        TextView description = new TextView(this);
-        description.setText(
-                "Your personal AI assistant.\n" +
-                "Ask questions and control your phone."
-        );
-        description.setTextSize(15);
-        description.setTextColor(0xFFFFFFFF);
-        description.setGravity(Gravity.CENTER);
-        description.setPadding(5, 5, 5, 20);
-
-        mainLayout.addView(description);
-
         statusText = new TextView(this);
-        statusText.setText("Status: Ready");
+
+        statusText.setText("P AI is ready.");
         statusText.setTextSize(14);
         statusText.setTextColor(0xFF00FF99);
-        statusText.setPadding(5, 10, 5, 15);
+        statusText.setGravity(Gravity.CENTER);
+        statusText.setPadding(10, 10, 10, 15);
 
         mainLayout.addView(statusText);
 
-        addButton(
-                "START BACKGROUND LISTENING",
-                v -> startBackgroundListening()
+        Button startListeningButton =
+                createButton("START BACKGROUND LISTENING");
+
+        startListeningButton.setOnClickListener(
+                view -> startBackgroundListening()
         );
 
-        addButton(
-                "STOP BACKGROUND LISTENING",
-                v -> stopBackgroundListening()
+        mainLayout.addView(startListeningButton);
+
+        Button stopListeningButton =
+                createButton("STOP BACKGROUND LISTENING");
+
+        stopListeningButton.setOnClickListener(
+                view -> stopBackgroundListening()
         );
 
-        TextView chatTitle = new TextView(this);
-        chatTitle.setText("AI CHAT");
-        chatTitle.setTextSize(20);
-        chatTitle.setTextColor(0xFFFFD700);
-        chatTitle.setPadding(5, 25, 5, 10);
+        mainLayout.addView(stopListeningButton);
 
-        mainLayout.addView(chatTitle);
+        chatScrollView = new ScrollView(this);
 
         chatLayout = new LinearLayout(this);
+
         chatLayout.setOrientation(LinearLayout.VERTICAL);
-        chatLayout.setPadding(5, 5, 5, 10);
+        chatLayout.setPadding(5, 10, 5, 10);
 
-        mainLayout.addView(chatLayout);
+        chatScrollView.addView(chatLayout);
 
-        messageInput = new EditText(this);
-        messageInput.setHint("Ask P AI anything...");
-        messageInput.setTextColor(0xFFFFFFFF);
-        messageInput.setHintTextColor(0xFFAAAAAA);
-        messageInput.setTextSize(16);
-        messageInput.setPadding(15, 12, 15, 12);
-        messageInput.setBackgroundColor(0xFF263746);
-
-        mainLayout.addView(
-                messageInput,
+        LinearLayout.LayoutParams scrollParams =
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                )
+                        0,
+                        1
+                );
+
+        scrollParams.setMargins(0, 15, 0, 15);
+
+        mainLayout.addView(chatScrollView, scrollParams);
+
+        messageInput = new EditText(this);
+
+        messageInput.setHint("Type a message to P AI...");
+        messageInput.setTextColor(0xFFFFFFFF);
+        messageInput.setHintTextColor(0xFFAAAAAA);
+        messageInput.setMinLines(2);
+        messageInput.setMaxLines(5);
+        messageInput.setPadding(15, 12, 15, 12);
+        messageInput.setBackgroundColor(0xFF292929);
+
+        mainLayout.addView(messageInput);
+
+        sendButton = createButton("SEND MESSAGE");
+
+        sendButton.setOnClickListener(
+                view -> sendMessage()
         );
 
-        addButton(
-                "SEND MESSAGE",
-                v -> sendMessage()
+        mainLayout.addView(sendButton);
+
+        Button speakButton =
+                createButton("SPEAK COMMAND");
+
+        speakButton.setOnClickListener(
+                view -> startManualVoiceInput()
         );
 
-        addButton(
-                "SPEAK COMMAND",
-                v -> startManualVoiceInput()
+        mainLayout.addView(speakButton);
+
+        Button stopSpeechButton =
+                createButton("STOP SPEAKING");
+
+        stopSpeechButton.setOnClickListener(
+                view -> stopSpeaking()
         );
 
-        addButton(
-                "STOP SPEAKING",
-                v -> stopSpeaking()
-        );
+        mainLayout.addView(stopSpeechButton);
 
-        setContentView(chatScrollView);
+        setContentView(mainLayout);
     }
 
-    private void addButton(
-            String text,
-            View.OnClickListener listener
-    ) {
+    private Button createButton(String text) {
 
         Button button = new Button(this);
 
         button.setText(text);
-        button.setTextSize(14);
-        button.setAllCaps(false);
-        button.setTextColor(0xFFFFFFFF);
+        button.setTextColor(0xFF000000);
 
         button.setBackgroundTintList(
-                ColorStateList.valueOf(0xFFB8860B)
+                android.content.res.ColorStateList.valueOf(
+                        0xFFFFD700
+                )
         );
-
-        LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                );
-
-        params.setMargins(0, 8, 0, 8);
-
-        mainLayout.addView(button, params);
-        button.setOnClickListener(listener);
-    }
-
-    private void addChatMessage(
-            String sender,
-            String message
-    ) {
-
-        TextView textView = new TextView(this);
-
-        textView.setText(sender + ":\n" + message);
-        textView.setTextSize(15);
-        textView.setTextColor(0xFFFFFFFF);
-        textView.setPadding(12, 12, 12, 12);
-        textView.setBackgroundColor(0xFF263746);
 
         LinearLayout.LayoutParams params =
                 new LinearLayout.LayoutParams(
@@ -249,41 +220,48 @@ public class MainActivity extends Activity {
 
         params.setMargins(0, 5, 0, 5);
 
-        chatLayout.addView(textView, params);
+        button.setLayoutParams(params);
 
-        chatScrollView.post(
-                () -> chatScrollView.fullScroll(View.FOCUS_DOWN)
-        );
+        return button;
     }
 
-    // =========================================
-    // STATUS DISPLAY
-    // =========================================
+    private void addChatMessage(String sender, String message) {
 
-    private void updateStatus(String message) {
-
-        if (activityDestroyed) {
+        if (activityDestroyed || chatLayout == null) {
             return;
         }
 
-        runOnUiThread(() -> {
+        TextView messageView = new TextView(this);
 
-            if (activityDestroyed || statusText == null) {
-                return;
-            }
+        messageView.setText(sender + ": " + message);
+        messageView.setTextSize(15);
+        messageView.setTextColor(0xFFFFFFFF);
+        messageView.setPadding(12, 10, 12, 10);
 
-            statusText.setText("Status: " + message);
-        });
+        chatLayout.addView(messageView);
+
+        chatScrollView.post(
+                () -> chatScrollView.fullScroll(
+                        ScrollView.FOCUS_DOWN
+                )
+        );
     }
 
-    // =========================================
+    private void updateStatus(String message) {
+
+        if (!activityDestroyed && statusText != null) {
+            statusText.setText(message);
+        }
+    }
+
+    // --------------------------------------------------
     // TEXT TO SPEECH
-    // =========================================
+    // --------------------------------------------------
 
     private void initializeTextToSpeech() {
 
         textToSpeech = new TextToSpeech(
-                this,
+                getApplicationContext(),
                 status -> {
 
                     if (activityDestroyed || textToSpeech == null) {
@@ -300,7 +278,12 @@ public class MainActivity extends Activity {
                                 result != TextToSpeech.LANG_MISSING_DATA
                                 && result != TextToSpeech.LANG_NOT_SUPPORTED;
 
+                        if (ttsReady) {
+                            updateStatus("P AI is ready.");
+                        }
+
                     } else {
+
                         ttsReady = false;
                     }
                 }
@@ -309,13 +292,14 @@ public class MainActivity extends Activity {
 
     private void speak(String message) {
 
-        if (ttsReady && textToSpeech != null) {
+        if (ttsReady && textToSpeech != null
+                && !activityDestroyed) {
 
             textToSpeech.speak(
                     message,
                     TextToSpeech.QUEUE_FLUSH,
                     null,
-                    "PAI_RESPONSE"
+                    "PAI_SPEECH"
             );
         }
     }
@@ -327,36 +311,25 @@ public class MainActivity extends Activity {
         }
     }
 
-    // =========================================
+    // --------------------------------------------------
     // PERMISSIONS
-    // =========================================
+    // --------------------------------------------------
 
-    private void requestRequiredPermissions() {
+    private void requestMicrophonePermission() {
 
-        ArrayList<String> permissions = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
 
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
+            if (checkSelfPermission(
+                    Manifest.permission.RECORD_AUDIO
+            ) != PackageManager.PERMISSION_GRANTED) {
 
-            permissions.add(Manifest.permission.RECORD_AUDIO);
-        }
-
-        if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(
-                        Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED) {
-
-            permissions.add(
-                    Manifest.permission.POST_NOTIFICATIONS
-            );
-        }
-
-        if (!permissions.isEmpty()) {
-
-            requestPermissions(
-                    permissions.toArray(new String[0]),
-                    PERMISSION_REQUEST_CODE
-            );
+                requestPermissions(
+                        new String[]{
+                                Manifest.permission.RECORD_AUDIO
+                        },
+                        PERMISSION_REQUEST_CODE
+                );
+            }
         }
     }
 
@@ -364,8 +337,7 @@ public class MainActivity extends Activity {
     public void onRequestPermissionsResult(
             int requestCode,
             String[] permissions,
-            int[] grantResults
-    ) {
+            int[] grantResults) {
 
         super.onRequestPermissionsResult(
                 requestCode,
@@ -373,74 +345,80 @@ public class MainActivity extends Activity {
                 grantResults
         );
 
-        if (requestCode != PERMISSION_REQUEST_CODE) {
-            return;
-        }
+        if (requestCode == PERMISSION_REQUEST_CODE) {
 
-        boolean microphoneGranted = false;
+            if (grantResults.length > 0
+                    && grantResults[0]
+                    == PackageManager.PERMISSION_GRANTED) {
 
-        for (int i = 0; i < permissions.length; i++) {
+                updateStatus("Microphone permission granted.");
 
-            if (Manifest.permission.RECORD_AUDIO.equals(permissions[i])
-                    && i < grantResults.length
-                    && grantResults[i] == PackageManager.PERMISSION_GRANTED) {
+            } else {
 
-                microphoneGranted = true;
+                updateStatus(
+                        "Microphone permission is required for voice features."
+                );
+
+                Toast.makeText(
+                        this,
+                        "Please allow microphone permission.",
+                        Toast.LENGTH_LONG
+                ).show();
             }
-        }
-
-        if (microphoneGranted) {
-            updateStatus("Microphone permission granted.");
-        } else {
-            updateStatus("Microphone permission is required.");
         }
     }
 
-    // =========================================
+    private boolean hasMicrophonePermission() {
+
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || checkSelfPermission(
+                        Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    // --------------------------------------------------
     // BACKGROUND VOICE SERVICE
-    // =========================================
+    // --------------------------------------------------
 
     private void startBackgroundListening() {
 
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
+        if (!hasMicrophonePermission()) {
 
-            Toast.makeText(
-                    this,
-                    "Grant microphone permission first.",
-                    Toast.LENGTH_LONG
-            ).show();
-
-            requestRequiredPermissions();
+            requestMicrophonePermission();
             return;
         }
 
+        Intent intent = new Intent(
+                this,
+                VoiceRecognitionService.class
+        );
+
+        intent.setAction(ACTION_START_VOICE);
+
         try {
 
-            Intent intent = new Intent(
-                    this,
-                    VoiceRecognitionService.class
-            );
-
-            intent.setAction(
-                    VoiceRecognitionService.ACTION_START
-            );
-
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
                 startForegroundService(intent);
+
             } else {
+
                 startService(intent);
             }
 
-            updateStatus("Starting background voice assistant.");
+            updateStatus(
+                    "Starting background voice recognition..."
+            );
 
-        } catch (Exception exception) {
+        } catch (Exception e) {
 
-            updateStatus("Unable to start voice assistant.");
+            updateStatus(
+                    "Unable to start background voice recognition."
+            );
 
             Toast.makeText(
                     this,
-                    "Could not start voice service.",
+                    "Voice service could not start.",
                     Toast.LENGTH_LONG
             ).show();
         }
@@ -448,75 +426,72 @@ public class MainActivity extends Activity {
 
     private void stopBackgroundListening() {
 
+        Intent intent = new Intent(
+                this,
+                VoiceRecognitionService.class
+        );
+
+        intent.setAction(ACTION_STOP_VOICE);
+
         try {
-
-            Intent intent = new Intent(
-                    this,
-                    VoiceRecognitionService.class
-            );
-
-            intent.setAction(
-                    VoiceRecognitionService.ACTION_STOP
-            );
 
             startService(intent);
 
-            updateStatus("Stopping background voice assistant.");
+            updateStatus(
+                    "Stopping background voice recognition..."
+            );
 
-        } catch (Exception exception) {
+        } catch (Exception e) {
 
-            updateStatus("Unable to stop voice assistant.");
+            updateStatus(
+                    "Unable to stop background voice recognition."
+            );
         }
     }
 
-    // =========================================
-    // MANUAL VOICE INPUT
-    // =========================================
+    // --------------------------------------------------
+    // MANUAL SPEECH RECOGNITION
+    // --------------------------------------------------
 
     private void startManualVoiceInput() {
 
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+        if (!hasMicrophonePermission()) {
 
-            Toast.makeText(
-                    this,
-                    "Speech recognition is unavailable.",
-                    Toast.LENGTH_LONG
-            ).show();
-
+            requestMicrophonePermission();
             return;
         }
 
-        Intent intent = new Intent(
-                RecognizerIntent.ACTION_RECOGNIZE_SPEECH
-        );
-
-        intent.putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-        );
-
-        intent.putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE,
-                Locale.getDefault().toLanguageTag()
-        );
-
-        intent.putExtra(
-                RecognizerIntent.EXTRA_PROMPT,
-                "Speak your command."
-        );
-
         try {
+
+            Intent intent = new Intent(
+                    RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+            );
+
+            intent.putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            );
+
+            intent.putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE,
+                    Locale.getDefault()
+            );
+
+            intent.putExtra(
+                    RecognizerIntent.EXTRA_PROMPT,
+                    "Speak to P AI"
+            );
 
             startActivityForResult(
                     intent,
                     VOICE_REQUEST_CODE
             );
 
-        } catch (Exception exception) {
+        } catch (Exception e) {
 
             Toast.makeText(
                     this,
-                    "Unable to open voice recognition.",
+                    "Voice recognition is unavailable.",
                     Toast.LENGTH_LONG
             ).show();
         }
@@ -526,8 +501,7 @@ public class MainActivity extends Activity {
     protected void onActivityResult(
             int requestCode,
             int resultCode,
-            Intent data
-    ) {
+            Intent data) {
 
         super.onActivityResult(
                 requestCode,
@@ -555,9 +529,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    // =========================================
-    // PHONE COMMAND PROCESSING
-    // =========================================
+    // --------------------------------------------------
+    // PHONE COMMANDS
+    // --------------------------------------------------
 
     private void processPhoneCommand(String command) {
 
@@ -565,94 +539,94 @@ public class MainActivity extends Activity {
             return;
         }
 
-        String cleanedCommand = command
-                .toLowerCase(Locale.ROOT)
-                .trim();
+        String cleanedCommand = command.trim();
 
-        if (cleanedCommand.startsWith("open ")) {
+        if (cleanedCommand.toLowerCase(Locale.ROOT)
+                .startsWith("open ")) {
 
             String applicationName =
                     cleanedCommand.substring(5).trim();
 
-            if (!applicationName.isEmpty()) {
-                openApplication(applicationName);
-            }
+            openApplication(applicationName);
 
-            return;
+        } else {
+
+            sendMessage();
         }
-
-        sendMessage();
     }
 
     private void openApplication(String applicationName) {
+
+        if (applicationName == null
+                || applicationName.trim().isEmpty()) {
+
+            speak("Please specify the application name.");
+            return;
+        }
 
         PackageManager packageManager = getPackageManager();
 
         try {
 
             for (ApplicationInfo application :
-                    packageManager.getInstalledApplications(
-                            PackageManager.GET_META_DATA
-                    )) {
+                    packageManager.getInstalledApplications(0)) {
 
-                String installedName =
-                        packageManager.getApplicationLabel(application)
-                                .toString();
+                String label = packageManager
+                        .getApplicationLabel(application)
+                        .toString();
 
-                if (installedName.equalsIgnoreCase(applicationName)) {
+                if (label.equalsIgnoreCase(
+                        applicationName.trim()
+                )) {
 
                     Intent launchIntent =
                             packageManager.getLaunchIntentForPackage(
                                     application.packageName
                             );
 
-                    if (launchIntent == null) {
+                    if (launchIntent != null) {
 
-                        addChatMessage(
-                                "P AI",
-                                "I cannot open that application."
-                        );
+                        startActivity(launchIntent);
+
+                        String response = "Opening " + label;
+
+                        addChatMessage("P AI", response);
+
+                        speak(response);
 
                         return;
                     }
-
-                    launchIntent.addFlags(
-                            Intent.FLAG_ACTIVITY_NEW_TASK
-                    );
-
-                    startActivity(launchIntent);
-
-                    addChatMessage(
-                            "P AI",
-                            "Opening " + installedName + "."
-                    );
-
-                    speak("Opening " + installedName);
-
-                    return;
                 }
             }
 
-            addChatMessage(
-                    "P AI",
+            String response =
                     "I could not find " + applicationName
-                            + " on your phone."
-            );
+                            + " on your phone.";
 
-        } catch (Exception exception) {
+            addChatMessage("P AI", response);
 
-            addChatMessage(
-                    "P AI",
-                    "Unable to open the application."
-            );
+            speak(response);
+
+        } catch (Exception e) {
+
+            String response =
+                    "I could not open that application.";
+
+            addChatMessage("P AI", response);
+
+            speak(response);
         }
     }
 
-    // =========================================
-    // ONLINE AI CONNECTION
-    // =========================================
+    // --------------------------------------------------
+    // AI COMMUNICATION
+    // --------------------------------------------------
 
     private void sendMessage() {
+
+        if (requestInProgress) {
+            return;
+        }
 
         String question = messageInput.getText()
                 .toString()
@@ -669,11 +643,15 @@ public class MainActivity extends Activity {
             return;
         }
 
+        requestInProgress = true;
+
         messageInput.setText("");
 
         addChatMessage("You", question);
 
         updateStatus("P AI is thinking...");
+
+        sendButton.setEnabled(false);
 
         try {
 
@@ -685,12 +663,15 @@ public class MainActivity extends Activity {
 
                     URL url = new URL(API_URL);
 
-                    connection =
-                            (HttpURLConnection) url.openConnection();
+                    connection = (HttpURLConnection)
+                            url.openConnection();
 
                     connection.setRequestMethod("POST");
+
                     connection.setConnectTimeout(20000);
+
                     connection.setReadTimeout(30000);
+
                     connection.setDoOutput(true);
 
                     connection.setRequestProperty(
@@ -704,6 +685,7 @@ public class MainActivity extends Activity {
                     );
 
                     JSONObject requestBody = new JSONObject();
+
                     requestBody.put("message", question);
 
                     byte[] requestBytes =
@@ -711,22 +693,51 @@ public class MainActivity extends Activity {
                                     StandardCharsets.UTF_8
                             );
 
+                    connection.setFixedLengthStreamingMode(
+                            requestBytes.length
+                    );
+
                     try (OutputStream outputStream =
                                  connection.getOutputStream()) {
 
                         outputStream.write(requestBytes);
+
                         outputStream.flush();
                     }
 
-                    int responseCode = connection.getResponseCode();
+                    int responseCode =
+                            connection.getResponseCode();
 
                     InputStream inputStream;
 
-                    if (responseCode >= 200 && responseCode < 300) {
+                    if (responseCode >= 200
+                            && responseCode < 300) {
+
                         inputStream = connection.getInputStream();
+
                     } else {
+
                         inputStream = connection.getErrorStream();
                     }
 
                     if (inputStream == null) {
-                        throw new Excepti
+
+                        throw new Exception(
+                                "The server returned no response."
+                        );
+                    }
+
+                    StringBuilder responseBuilder =
+                            new StringBuilder();
+
+                    try (BufferedReader reader =
+                                 new BufferedReader(
+                                         new InputStreamReader(
+                                                 inputStream,
+                                                 StandardCharsets.UTF_8
+                                         )
+                                 )) {
+
+                        String line;
+
+                        while ((line = reader.readLine()) != nu
