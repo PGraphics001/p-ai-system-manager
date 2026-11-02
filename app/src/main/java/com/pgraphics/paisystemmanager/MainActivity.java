@@ -253,21 +253,18 @@ backgroundVoiceButton.setOnClickListener(
     }
 
     // PART 2 CONTINUES BELOW
-    private void checkAudioPermission() {
+       private void checkAudioPermission() {
 
-        if (Build.VERSION.SDK_INT >= 23) {
+        if (checkSelfPermission(
+                Manifest.permission.RECORD_AUDIO
+        ) != PackageManager.PERMISSION_GRANTED) {
 
-            if (checkSelfPermission(
-                    Manifest.permission.RECORD_AUDIO
-            ) != PackageManager.PERMISSION_GRANTED) {
-
-                requestPermissions(
-                        new String[]{
-                                Manifest.permission.RECORD_AUDIO
-                        },
-                        AUDIO_PERMISSION_REQUEST
-                );
-            }
+            requestPermissions(
+                    new String[]{
+                            Manifest.permission.RECORD_AUDIO
+                    },
+                    AUDIO_PERMISSION_REQUEST
+            );
         }
     }
 
@@ -441,6 +438,8 @@ backgroundVoiceButton.setOnClickListener(
 
             checkAudioPermission();
 
+            updateStatus("Microphone permission is required.");
+
             return;
         }
 
@@ -464,12 +463,27 @@ backgroundVoiceButton.setOnClickListener(
                 startService(serviceIntent);
             }
 
-            updateStatus("Starting background voice assistant...");
-backgroundVoiceActive = true;
-backgroundVoiceButton.setText("STOP BACKGROUND VOICE");
+            backgroundVoiceActive = true;
+
+            backgroundVoiceButton.setText(
+                    "STOP BACKGROUND VOICE"
+            );
+
+            updateStatus(
+                    "Starting background voice assistant..."
+            );
+
         } catch (Exception e) {
 
-            updateStatus("Unable to start background voice assistant.");
+            backgroundVoiceActive = false;
+
+            backgroundVoiceButton.setText(
+                    "START BACKGROUND VOICE"
+            );
+
+            updateStatus(
+                    "Unable to start background voice assistant."
+            );
 
             Toast.makeText(
                     this,
@@ -490,12 +504,27 @@ backgroundVoiceButton.setText("STOP BACKGROUND VOICE");
                 "com.pgraphics.paisystemmanager.STOP_VOICE"
         );
 
-        startService(serviceIntent);
+        try {
 
-        updateStatus("Background voice assistant stopped.");
-    }
-backgroundVoiceActive = false;
-backgroundVoiceButton.setText("START BACKGROUND VOICE");
+            startService(serviceIntent);
+
+            backgroundVoiceActive = false;
+
+            backgroundVoiceButton.setText(
+                    "START BACKGROUND VOICE"
+            );
+
+            updateStatus(
+                    "Background voice assistant stopped."
+            );
+
+        } catch (Exception e) {
+
+            updateStatus(
+                    "Unable to stop background voice assistant."
+            );
+        }
+    }   
     // PART 3 CONTINUES BELOW
     private void sendMessage() {
 
