@@ -1090,11 +1090,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    //
-==================================================
+        // ==================================================
     // AI MESSAGE PROCESSING
     // ==================================================
-
     private void sendMessage() {
 
         if (requestInProgress) {
