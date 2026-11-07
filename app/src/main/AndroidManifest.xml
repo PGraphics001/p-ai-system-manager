@@ -2,38 +2,29 @@
 
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Network permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Microphone permission -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Foreground service permissions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
-    <!-- Notification permission -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Prevent CPU sleep during background operations -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Microphone hardware is optional -->
     <uses-feature
         android:name="android.hardware.microphone"
         android:required="false" />
 
-    <!-- Package visibility declarations -->
     <queries>
 
-        <!-- Discover installed launchable applications -->
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
 
-        <!-- Discover Android speech recognition services -->
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
@@ -48,9 +39,10 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="false">
 
-        <!-- Main application activity -->
+        <!-- Authentication screen: application launcher -->
+
         <activity
-            android:name=".MainActivity"
+            android:name=".AuthActivity"
             android:exported="true">
 
             <intent-filter>
@@ -60,7 +52,14 @@
 
         </activity>
 
+        <!-- Main AI application -->
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="false" />
+
         <!-- Background microphone recognition service -->
+
         <service
             android:name=".VoiceRecognitionService"
             android:enabled="true"
