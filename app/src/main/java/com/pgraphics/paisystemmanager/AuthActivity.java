@@ -1,34 +1,33 @@
 package com.pgraphics.paisystemmanager;
 
 import android.app.Activity;
+import android.os.Bundle;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.os.Bundle;
-import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+
 public class AuthActivity extends Activity {
 
-    private static final int BACKGROUND = Color.rgb(15, 15, 20);
-    private static final int CARD = Color.rgb(27, 27, 36);
-    private static final int ACCENT = Color.rgb(210, 160, 65);
+    private static final int BLUE = Color.rgb(35, 115, 255);
+    private static final int BACKGROUND = Color.rgb(10, 14, 25);
     private static final int WHITE = Color.WHITE;
-    private static final int MUTED = Color.rgb(165, 165, 175);
-
-    private AuthSessionManager authManager;
+    private static final int MUTED = Color.rgb(155, 170, 195);
 
     private LinearLayout root;
     private LinearLayout form;
-    private LinearLayout fieldsContainer;
 
     private EditText nameInput;
     private EditText emailInput;
@@ -38,196 +37,190 @@ public class AuthActivity extends Activity {
     private TextView title;
     private TextView subtitle;
     private TextView switchMode;
-    private TextView forgotPassword;
 
     private Button actionButton;
-
-    private ProgressBar progressBar;
+    private TextView forgotPassword;
 
     private boolean registrationMode = false;
     private boolean busy = false;
+
+    private AuthSessionManager sessionManager;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        authManager = AuthSessionManager.getInstance(this);
+        getWindow().setStatusBarColor(BACKGROUND);
+        getWindow().setNavigationBarColor(BACKGROUND);
+
+        sessionManager = AuthSessionManager.getInstance(this);
 
         buildInterface();
 
-        restoreExistingSession();
+        restoreSavedSession();
     }
-
-    // ==========================================
-    // BUILD AUTHENTICATION INTERFACE
-    // ==========================================
 
     private void buildInterface() {
 
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER);
-        root.setPadding(dp(24), dp(20), dp(24), dp(20));
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.setPadding(dp(24), dp(30), dp(24), dp(25));
         root.setBackgroundColor(BACKGROUND);
 
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
+        scrollView.setVerticalScrollBarEnabled(false);
 
-        LinearLayout.LayoutParams scrollParams =
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        TextView logo = new TextView(this);
+        logo.setText("P");
+        logo.setTextSize(42);
+        logo.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        logo.setTextColor(WHITE);
+        logo.setGravity(Gravity.CENTER);
+        logo.setBackground(background(BLUE, 22));
+
+        LinearLayout.LayoutParams logoParams =
+                new LinearLayout.LayoutParams(dp(82), dp(82));
+
+        logoParams.gravity = Gravity.CENTER;
+        logoParams.bottomMargin = dp(20);
+
+        container.addView(logo, logoParams);
+
+        TextView brand = new TextView(this);
+        brand.setText("P AI SYSTEM MANAGER");
+        brand.setTextColor(WHITE);
+        brand.setTextSize(22);
+        brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        brand.setGravity(Gravity.CENTER);
+
+        container.addView(brand);
+
+        subtitle = new TextView(this);
+        subtitle.setText("Your intelligent personal assistant");
+        subtitle.setTextColor(MUTED);
+        subtitle.setTextSize(14);
+        subtitle.setGravity(Gravity.CENTER);
+
+        LinearLayout.LayoutParams subtitleParams =
                 new LinearLayout.LayoutParams(
-                        -1,
-                        -1
-                );
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
 
-        root.addView(scrollView, scrollParams);
+        subtitleParams.topMargin = dp(8);
+        subtitleParams.bottomMargin = dp(35);
+
+        container.addView(subtitle, subtitleParams);
 
         form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
-        form.setGravity(Gravity.CENTER_HORIZONTAL);
-        form.setPadding(dp(20), dp(30), dp(20), dp(30));
-        form.setBackground(roundedBackground(CARD, 22));
-
-        scrollView.addView(form);
-
-        TextView logo = new TextView(this);
-        logo.setText("P AI");
-        logo.setTextSize(38);
-        logo.setTypeface(Typeface.DEFAULT_BOLD);
-        logo.setTextColor(ACCENT);
-        logo.setGravity(Gravity.CENTER);
-
-        form.addView(logo, matchWrap());
-
-        TextView brand = new TextView(this);
-        brand.setText("SYSTEM MANAGER");
-        brand.setTextSize(13);
-        brand.setLetterSpacing(0.18f);
-        brand.setTextColor(WHITE);
-        brand.setGravity(Gravity.CENTER);
-
-        LinearLayout.LayoutParams brandParams = matchWrap();
-        brandParams.topMargin = dp(5);
-
-        form.addView(brand, brandParams);
+        form.setPadding(dp(20), dp(25), dp(20), dp(25));
+        form.setBackground(background(Color.rgb(19, 27, 44), 20));
 
         title = new TextView(this);
-        title.setTextSize(25);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(WHITE);
-        title.setGravity(Gravity.CENTER);
+        title.setTextSize(23);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
 
-        LinearLayout.LayoutParams titleParams = matchWrap();
-        titleParams.topMargin = dp(35);
+        form.addView(title);
 
-        form.addView(title, titleParams);
+        TextView description = new TextView(this);
+        description.setText("Enter your details to continue.");
+        description.setTextColor(MUTED);
+        description.setTextSize(13);
 
-        subtitle = new TextView(this);
-        subtitle.setTextSize(14);
-        subtitle.setTextColor(MUTED);
-        subtitle.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams descriptionParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
 
-        LinearLayout.LayoutParams subtitleParams = matchWrap();
-        subtitleParams.topMargin = dp(10);
-        subtitleParams.bottomMargin = dp(25);
+        descriptionParams.topMargin = dp(7);
+        descriptionParams.bottomMargin = dp(20);
 
-        form.addView(subtitle, subtitleParams);
+        form.addView(description, descriptionParams);
 
-        fieldsContainer = new LinearLayout(this);
-        fieldsContainer.setOrientation(LinearLayout.VERTICAL);
+        nameInput = createInput("Full name");
+        emailInput = createInput("Email address");
+        passwordInput = createInput("Password");
+        confirmPasswordInput = createInput("Confirm password");
 
-        form.addView(fieldsContainer, matchWrap());
+        form.addView(nameInput);
+        form.addView(emailInput);
+        form.addView(passwordInput);
+        form.addView(confirmPasswordInput);
 
-        nameInput = createInput(
-                "Full name",
-                InputType.TYPE_CLASS_TEXT
-                        | InputType.TYPE_TEXT_FLAG_CAP_WORDS
-        );
+        forgotPassword = new TextView(this);
+        forgotPassword.setText("Forgot password?");
+        forgotPassword.setTextColor(BLUE);
+        forgotPassword.setTextSize(14);
+        forgotPassword.setGravity(Gravity.END);
+        forgotPassword.setPadding(0, dp(12), 0, dp(18));
 
-        emailInput = createInput(
-                "Email address",
-                InputType.TYPE_CLASS_TEXT
-                        | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-        );
+        forgotPassword.setOnClickListener(v -> resetPassword());
 
-        passwordInput = createInput(
-                "Password",
-                InputType.TYPE_CLASS_TEXT
-                        | InputType.TYPE_TEXT_VARIATION_PASSWORD
-        );
-
-        confirmPasswordInput = createInput(
-                "Confirm password",
-                InputType.TYPE_CLASS_TEXT
-                        | InputType.TYPE_TEXT_VARIATION_PASSWORD
-        );
+        form.addView(forgotPassword);
 
         actionButton = new Button(this);
-        actionButton.setTextColor(Color.BLACK);
+        actionButton.setTextColor(WHITE);
         actionButton.setTextSize(15);
-        actionButton.setTypeface(Typeface.DEFAULT_BOLD);
-        actionButton.setBackground(roundedBackground(ACCENT, 14));
+        actionButton.setAllCaps(false);
+        actionButton.setBackground(background(BLUE, 12));
 
-        LinearLayout.LayoutParams buttonParams = matchWrap();
-        buttonParams.topMargin = dp(20);
-        buttonParams.height = dp(54);
-
-        form.addView(actionButton, buttonParams);
-
-        progressBar = new ProgressBar(this);
-        progressBar.setVisibility(View.GONE);
-
-        LinearLayout.LayoutParams progressParams =
+        form.addView(actionButton,
                 new LinearLayout.LayoutParams(
-                        -2,
-                        dp(40)
-                );
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(52)));
 
-        progressParams.gravity = Gravity.CENTER;
+        switchMode = new TextView(this);
+        switchMode.setTextColor(MUTED);
+        switchMode.setTextSize(14);
+        switchMode.setGravity(Gravity.CENTER);
+        switchMode.setPadding(0, dp(22), 0, dp(5));
 
-        form.addView(progressBar, progressParams);
+        switchMode.setOnClickListener(v -> {
+            registrationMode = !registrationMode;
+            updateAuthenticationMode();
+        });
 
-        forgotPassword = createLink("Forgot password?");
+        form.addView(switchMode);
 
-        LinearLayout.LayoutParams forgotParams = matchWrap();
-        forgotParams.topMargin = dp(18);
-
-        form.addView(forgotPassword, forgotParams);
-
-        switchMode = createLink("");
-
-        LinearLayout.LayoutParams switchParams = matchWrap();
-        switchParams.topMargin = dp(22);
-
-        form.addView(switchMode, switchParams);
+        container.addView(form);
 
         TextView footer = new TextView(this);
-        footer.setText("SECURE ACCESS • P GRAPHICS");
-        footer.setTextColor(MUTED);
-        footer.setTextSize(10);
+        footer.setText("POWERED BY P GRAPHICS");
+        footer.setTextColor(Color.rgb(100, 120, 155));
+        footer.setTextSize(11);
         footer.setGravity(Gravity.CENTER);
 
-        LinearLayout.LayoutParams footerParams = matchWrap();
+        LinearLayout.LayoutParams footerParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+
         footerParams.topMargin = dp(30);
 
-        form.addView(footer, footerParams);
+        container.addView(footer, footerParams);
 
-        actionButton.setOnClickListener(v -> performAuthentication());
+        scrollView.addView(container);
 
-        forgotPassword.setOnClickListener(v -> performPasswordReset());
-
-        switchMode.setOnClickListener(v -> switchAuthenticationMode());
+        root.addView(scrollView,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        0,
+                        1));
 
         updateAuthenticationMode();
+
+        // CRITICAL FIX: Display the authentication interface.
+        setContentView(root);
     }
 
-    // ==========================================
-    // INPUT CREATION
-    // ==========================================
-
-    private EditText createInput(
-            String hint,
-            int inputType
-    ) {
+    private EditText createInput(String hint) {
 
         EditText input = new EditText(this);
 
@@ -236,375 +229,469 @@ public class AuthActivity extends Activity {
         input.setTextColor(WHITE);
         input.setTextSize(15);
         input.setSingleLine(true);
-        input.setInputType(inputType);
-        input.setPadding(
-                dp(15),
-                dp(12),
-                dp(15),
-                dp(12)
-        );
+        input.setPadding(dp(15), 0, dp(15), 0);
 
-        input.setBackground(roundedBackground(
-                Color.rgb(42, 42, 53),
-                12
-        ));
+        input.setBackground(background(
+                Color.rgb(29, 40, 61), 10));
 
-        LinearLayout.LayoutParams params = matchWrap();
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(53));
 
-        params.height = dp(54);
         params.bottomMargin = dp(13);
 
-        fieldsContainer.addView(input, params);
+        input.setLayoutParams(params);
+
+        if (hint.toLowerCase().contains("password")) {
+            input.setInputType(
+                    android.text.InputType.TYPE_CLASS_TEXT |
+                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        } else if (hint.toLowerCase().contains("email")) {
+            input.setInputType(
+                    android.text.InputType.TYPE_CLASS_TEXT |
+                    android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        } else {
+            input.setInputType(
+                    android.text.InputType.TYPE_CLASS_TEXT |
+                    android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        }
 
         return input;
     }
 
-    private TextView createLink(String text) {
+    private GradientDrawable background(int color, int radius) {
 
-        TextView view = new TextView(this);
-
-        view.setText(text);
-        view.setTextSize(14);
-        view.setTextColor(ACCENT);
-        view.setGravity(Gravity.CENTER);
-
-        return view;
-    }
-
-    // ==========================================
-    // LOGIN / REGISTRATION MODE
-    // ==========================================
-
-    private void switchAuthenticationMode() {
-
-        if (busy) {
-            return;
-        }
-
-        registrationMode = !registrationMode;
-
-        updateAuthenticationMode();
-    }
-
-    private void updateAuthenticationMode() {
-
-        title.setText(
-                registrationMode
-                        ? "Create Your Account"
-                        : "Welcome Back"
-        );
-
-        subtitle.setText(
-                registrationMode
-                        ? "Create an account to access P AI."
-                        : "Sign in to continue to P AI."
-        );
-
-        nameInput.setVisibility(
-                registrationMode
-                        ? View.VISIBLE
-                        : View.GONE
-        );
-
-        confirmPasswordInput.setVisibility(
-                registrationMode
-                        ? View.VISIBLE
-                        : View.GONE
-        );
-
-        forgotPassword.setVisibility(
-                registrationMode
-                        ? View.GONE
-                        : View.VISIBLE
-        );
-
-        actionButton.setText(
-                registrationMode
-                        ? "CREATE ACCOUNT"
-                        : "SIGN IN"
-        );
-
-        switchMode.setText(
-                registrationMode
-                        ? "Already have an account? Sign in"
-                        : "New to P AI? Create an account"
-        );
-    }
-
-    // ==========================================
-    // AUTHENTICATION
-    // ==========================================
-
-    private void performAuthentication() {
-
-        if (busy) {
-            return;
-        }
-
-        String email = emailInput.getText()
-                .toString()
-                .trim();
-
-        String password = passwordInput.getText()
-                .toString();
-
-        if (email.isEmpty() || password.isEmpty()) {
-
-            showMessage("Please enter your email and password.");
-
-            return;
-        }
-
-        if (!android.util.Patterns.EMAIL_ADDRESS
-                .matcher(email).matches()) {
-
-            showMessage("Please enter a valid email address.");
-
-            return;
-        }
-
-        if (registrationMode) {
-
-            String fullName = nameInput.getText()
-                    .toString()
-                    .trim();
-
-            String confirmPassword =
-                    confirmPasswordInput.getText()
-                            .toString();
-
-            if (fullName.isEmpty()) {
-
-                showMessage("Please enter your full name.");
-
-                return;
-            }
-
-            if (password.length() < 6) {
-
-                showMessage(
-                        "Password must contain at least 6 characters."
-                );
-
-                return;
-            }
-
-            if (!password.equals(confirmPassword)) {
-
-                showMessage("Passwords do not match.");
-
-                return;
-            }
-
-            setBusy(true);
-
-            authManager.signUp(
-                    fullName,
-                    email,
-                    password,
-                    result -> {
-
-                        setBusy(false);
-
-                        if (!result.success) {
-
-                            showMessage(result.message);
-
-                            return;
-                        }
-
-                        if (result.requiresEmailConfirmation) {
-
-                            showMessage(
-                                    "Account created. Please confirm your email before signing in."
-                            );
-
-                            registrationMode = false;
-
-                            passwordInput.setText("");
-
-                            confirmPasswordInput.setText("");
-
-                            updateAuthenticationMode();
-
-                        } else {
-
-                            showMessage("Account created successfully.");
-
-                            openMainActivity();
-                        }
-                    }
-            );
-
-        } else {
-
-            setBusy(true);
-
-            authManager.signIn(
-                    email,
-                    password,
-                    result -> {
-
-                        setBusy(false);
-
-                        if (result.success) {
-
-                            showMessage("Welcome to P AI.");
-
-                            openMainActivity();
-
-                        } else {
-
-                            showMessage(result.message);
-                        }
-                    }
-            );
-        }
-    }
-
-    // ==========================================
-    // PASSWORD RESET
-    // ==========================================
-
-    private void performPasswordReset() {
-
-        if (busy) {
-            return;
-        }
-
-        String email = emailInput.getText()
-                .toString()
-                .trim();
-
-        if (!android.util.Patterns.EMAIL_ADDRESS
-                .matcher(email).matches()) {
-
-            showMessage("Enter your valid email address first.");
-
-            return;
-        }
-
-        setBusy(true);
-
-        authManager.sendPasswordReset(
-                email,
-                result -> {
-
-                    setBusy(false);
-
-                    showMessage(result.message);
-                }
-        );
-    }
-
-    // ==========================================
-    // RESTORE SAVED LOGIN
-    // ==========================================
-
-    private void restoreExistingSession() {
-
-        if (!authManager.hasSavedSession()) {
-            return;
-        }
-
-        setBusy(true);
-
-        authManager.restoreSession(result -> {
-
-            setBusy(false);
-
-            if (result.success) {
-
-                openMainActivity();
-
-            } else {
-
-                showMessage(
-                        "Please sign in to continue."
-                );
-            }
-        });
-    }
-
-    // ==========================================
-    // OPEN MAIN APPLICATION
-    // ==========================================
-
-    private void openMainActivity() {
-
-        android.content.Intent intent =
-                new android.content.Intent(
-                        AuthActivity.this,
-                        MainActivity.class
-                );
-
-        intent.setFlags(
-                android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-                        | android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
-        );
-
-        startActivity(intent);
-
-        finish();
-    }
-
-    // ==========================================
-    // LOADING STATE
-    // ==========================================
-
-    private void setBusy(boolean state) {
-
-        busy = state;
-
-        actionButton.setEnabled(!state);
-
-        forgotPassword.setEnabled(!state);
-
-        switchMode.setEnabled(!state);
-
-        progressBar.setVisibility(
-                state
-                        ? View.VISIBLE
-                        : View.GONE
-        );
-
-        actionButton.setAlpha(state ? 0.5f : 1.0f);
-    }
-
-    // ==========================================
-    // UI HELPERS
-    // ==========================================
-
-    private GradientDrawable roundedBackground(
-            int color,
-            int radius
-    ) {
-
-        GradientDrawable drawable =
-                new GradientDrawable();
+        GradientDrawable drawable = new GradientDrawable();
 
         drawable.setColor(color);
-
         drawable.setCornerRadius(dp(radius));
 
         return drawable;
     }
 
-    private LinearLayout.LayoutParams matchWrap() {
+    private void updateAuthenticationMode() {
 
-        return new LinearLayout.LayoutParams(
-                -1,
-                -2
-        );
+        if (registrationMode) {
+
+            title.setText("Create Account");
+            actionButton.setText("Create Account");
+
+            nameInput.setVisibility(View.VISIBLE);
+            confirmPasswordInput.setVisibility(View.VISIBLE);
+
+            forgotPassword.setVisibility(View.GONE);
+
+            switchMode.setText(
+                    "Already have an account? Sign in");
+
+        } else {
+
+            title.setText("Welcome Back");
+            actionButton.setText("Sign In");
+
+            nameInput.setVisibility(View.GONE);
+            confirmPasswordInput.setVisibility(View.GONE);
+
+            forgotPassword.setVisibility(View.VISIBLE);
+
+            switchMode.setText(
+                    "New to P AI? Create an account");
+        }
+
+        actionButton.setOnClickListener(v -> authenticate());
     }
 
-    private int dp(float value) {
+    private void authenticate() {
 
-        return (int) (
-                value * getResources()
-                        .getDisplayMetrics()
-                        .density
-        );
+        if (busy) return;
+
+        String email = emailInput.getText().toString().trim();
+        String password = passwordInput.getText().toString();
+
+        if (email.isEmpty() || password.isEmpty()) {
+            showMessage("Please enter your email and password.");
+            return;
+        }
+
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
+            showMessage("Enter a valid email address.");
+            return;
+        }
+
+        if (password.length() < 6) {
+            showMessage("Password must contain at least 6 characters.");
+            return;
+        }
+
+        if (registrationMode) {
+
+            String name = nameInput.getText().toString().trim();
+
+            String confirmation =
+                    confirmPasswordInput.getText().toString();
+
+            if (name.isEmpty()) {
+                showMessage("Please enter your full name.");
+                return;
+            }
+
+            if (!password.equals(confirmation)) {
+                showMessage("Passwords do not match.");
+                return;
+            }
+
+            performAuthentication(
+                    "signUp", name, email, password);
+
+        } else {
+
+            performAuthentication(
+                    "signIn", null, email, password);
+        }
+    }
+
+    private void performAuthentication(
+            String operation,
+            String name,
+            String email,
+            String password) {
+
+        setBusy(true);
+
+        try {
+
+            int argumentCount = operation.equals("signUp") ? 4 : 3;
+
+            Method selected = null;
+
+            for (Method method : sessionManager.getClass().getMethods()) {
+
+                if (method.getName().equals(operation)
+                        && method.getParameterTypes().length == argumentCount) {
+
+                    selected = method;
+                    break;
+                }
+            }
+
+            if (selected == null) {
+                setBusy(false);
+                showMessage("Authentication method is unavailable.");
+                return;
+            }
+
+            Class<?> callbackType =
+                    selected.getParameterTypes()[argumentCount - 1];
+
+            if (!callbackType.isInterface()) {
+                setBusy(false);
+                showMessage("Authentication callback configuration error.");
+                return;
+            }
+
+            Method authMethod = selected;
+
+            Object callback = Proxy.newProxyInstance(
+                    callbackType.getClassLoader(),
+                    new Class<?>[]{callbackType},
+                    (proxy, method, args) -> {
+
+                        if (args != null && args.length > 0) {
+
+                            Object result = args[0];
+
+                            boolean success =
+                                    readBoolean(result, "success");
+
+                            String message =
+                                    readString(result, "message");
+
+                            boolean confirmationRequired =
+                                    readBoolean(result,
+                                            "requiresEmailConfirmation");
+
+                            runOnUiThread(() -> {
+
+                                setBusy(false);
+
+                                if (success) {
+
+                                    if (confirmationRequired) {
+
+                                        showMessage(
+                                                "Account created. Please confirm your email.");
+
+                                    } else {
+
+                                        openMainActivity();
+                                    }
+
+                                } else {
+
+                                    showMessage(message.isEmpty()
+                                            ? "Authentication failed."
+                                            : message);
+                                }
+                            });
+                        }
+
+                        return null;
+                    });
+
+            if (operation.equals("signUp")) {
+
+                authMethod.invoke(
+                        sessionManager,
+                        name,
+                        email,
+                        password,
+                        callback);
+
+            } else {
+
+                authMethod.invoke(
+                        sessionManager,
+                        email,
+                        password,
+                        callback);
+            }
+
+        } catch (Exception e) {
+
+            setBusy(false);
+
+            showMessage("Authentication error: "
+                    + e.getMessage());
+        }
+    }
+
+    private void resetPassword() {
+
+        String email = emailInput.getText().toString().trim();
+
+        if (email.isEmpty()) {
+            showMessage("Enter your email address first.");
+            return;
+        }
+
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
+            showMessage("Enter a valid email address.");
+            return;
+        }
+
+        try {
+
+            Method selected = null;
+
+            for (Method method : sessionManager.getClass().getMethods()) {
+
+                if (method.getName().equals("sendPasswordReset")
+                        && method.getParameterTypes().length == 2) {
+
+                    selected = method;
+                    break;
+                }
+            }
+
+            if (selected == null) {
+                showMessage("Password reset is unavailable.");
+                return;
+            }
+
+            Class<?> callbackType =
+                    selected.getParameterTypes()[1];
+
+            if (!callbackType.isInterface()) {
+                showMessage("Password reset callback configuration error.");
+                return;
+            }
+
+            Object callback = Proxy.newProxyInstance(
+                    callbackType.getClassLoader(),
+                    new Class<?>[]{callbackType},
+                    (proxy, method, args) -> {
+
+                        if (args != null && args.length > 0) {
+
+                            Object result = args[0];
+
+                            boolean success =
+                                    readBoolean(result, "success");
+
+                            String message =
+                                    readString(result, "message");
+
+                            runOnUiThread(() ->
+                                    showMessage(message.isEmpty()
+                                            ? (success
+                                                ? "Password reset request sent."
+                                                : "Password reset failed.")
+                                            : message));
+                        }
+
+                        return null;
+                    });
+
+            selected.invoke(sessionManager, email, callback);
+
+        } catch (Exception e) {
+
+            showMessage("Unable to process password reset.");
+        }
+    }
+
+    private void restoreSavedSession() {
+
+        try {
+
+            Method hasSession =
+                    sessionManager.getClass().getMethod("hasSavedSession");
+
+            boolean saved = (Boolean) hasSession.invoke(sessionManager);
+
+            if (!saved) return;
+
+            Method restore = null;
+
+            for (Method method : sessionManager.getClass().getMethods()) {
+
+                if (method.getName().equals("restoreSession")
+                        && method.getParameterTypes().length == 1) {
+
+                    restore = method;
+                    break;
+                }
+            }
+
+            if (restore == null) return;
+
+            Class<?> callbackType =
+                    restore.getParameterTypes()[0];
+
+            if (!callbackType.isInterface()) return;
+
+            Object callback = Proxy.newProxyInstance(
+                    callbackType.getClassLoader(),
+                    new Class<?>[]{callbackType},
+                    (proxy, method, args) -> {
+
+                        if (args != null && args.length > 0) {
+
+                            Object result = args[0];
+
+                            boolean success =
+                                    readBoolean(result, "success");
+
+                            if (success) {
+                                runOnUiThread(this::openMainActivity);
+                            }
+                        }
+
+                        return null;
+                    });
+
+            restore.invoke(sessionManager, callback);
+
+        } catch (Exception e) {
+
+            android.util.Log.e(
+                    "PAI_AUTH",
+                    "Session restoration failed",
+                    e);
+        }
+    }
+
+    private boolean readBoolean(Object object, String name) {
+
+        if (object == null) return false;
+
+        try {
+
+            Method method = object.getClass().getMethod(
+                    "is" + Character.toUpperCase(name.charAt(0))
+                            + name.substring(1));
+
+            Object value = method.invoke(object);
+
+            return Boolean.TRUE.equals(value);
+
+        } catch (Exception ignored) {
+        }
+
+        try {
+
+            Field field = object.getClass().getField(name);
+
+            return Boolean.TRUE.equals(field.get(object));
+
+        } catch (Exception ignored) {
+        }
+
+        return false;
+    }
+
+    private String readString(Object object, String name) {
+
+        if (object == null) return "";
+
+        try {
+
+            Method method = object.getClass().getMethod(
+                    "get" + Character.toUpperCase(name.charAt(0))
+                            + name.substring(1));
+
+            Object value = method.invoke(object);
+
+            return value == null ? "" : value.toString();
+
+        } catch (Exception ignored) {
+        }
+
+        try {
+
+            Field field = object.getClass().getField(name);
+
+            Object value = field.get(object);
+
+            return value == null ? "" : value.toString();
+
+        } catch (Exception ignored) {
+        }
+
+        return "";
+    }
+
+    private void openMainActivity() {
+
+        if (isFinishing() || isDestroyed()) return;
+
+        android.content.Intent intent =
+                new android.content.Intent(
+                    AuthActivity.this,
+                        MainActivity.class);
+
+        intent.setFlags(
+                android.content.Intent.FLAG_ACTIVITY_NEW_TASK |
+                android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK);
+
+        startActivity(intent);
+        finish();
+    }
+
+    private void setBusy(boolean value) {
+
+        busy = value;
+
+        actionButton.setEnabled(!value);
+
+        actionButton.setAlpha(value ? 0.6f : 1f);
+
+        actionButton.setText(value
+                ? "Please wait..."
+                : registrationMode
+                    ? "Create Account"
+                    : "Sign In");
     }
 
     private void showMessage(String message) {
@@ -612,7 +699,13 @@ public class AuthActivity extends Activity {
         Toast.makeText(
                 this,
                 message,
-                Toast.LENGTH_LONG
-        ).show();
+                Toast.LENGTH_LONG).show();
+    }
+
+    private int dp(int value) {
+
+        return (int) (value *
+                getResources().getDisplayMetrics().density + 0.5f);
     }
 }
+      
