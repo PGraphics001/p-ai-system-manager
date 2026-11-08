@@ -2,13 +2,11 @@ package com.pgraphics.paisystemmanager;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
-import android.security.keystore.KeyGenParameterSpec;
-import android.security.keystore.KeyProperties;
 import android.util.Base64;
 
-import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -17,6 +15,8 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.util.concurrent.ExecutorService;
@@ -35,48 +35,34 @@ public class AuthSessionManager {
     private static final String SUPABASE_KEY =
             "sb_publishable_ml3kl9b6o06ImrHwcIa9hg_PbSasRZw";
 
-    private static final String KEY_ALIAS =
-            "PAI_AUTH_ENCRYPTION_KEY";
+    private static final String AUTH_REDIRECT_URL =
+            "com.pgraphics.paisystemmanager://auth/callback";
 
-    private static final String PREF_NAME =
-            "pai_secure_auth";
-
-    private static final String SESSION_KEY =
-            "encrypted_session";
-
-    private static final String IV_KEY =
-            "session_iv";
+    private static final String KEY_ALIAS = "PAI_AUTH_ENCRYPTION_KEY";
+    private static final String PREF_NAME = "pai_secure_auth";
+    private static final String SESSION_KEY = "encrypted_session";
+    private static final String IV_KEY = "session_iv";
 
     private static final int TIMEOUT = 20000;
 
-    private final Context context;
-
-    private final ExecutorService executor;
-
-    private final Handler mainHandler;
-
-    private final SharedPreferences preferences;
-
     private static AuthSessionManager instance;
+
+    private final Context context;
+    private final SharedPreferences preferences;
+    private final ExecutorService executor;
+    private final Handler mainHandler;
 
     public interface AuthCallback {
         void onComplete(AuthResult result);
     }
 
-    public static class AuthResult {
-
+    public static final class AuthResult {
         public final boolean success;
-
         public final String message;
-
         public final String userId;
-
         public final String email;
-
         public final String fullName;
-
         public final String accessToken;
-
         public final boolean requiresEmailConfirmation;
 
         AuthResult(
@@ -94,29 +80,23 @@ public class AuthSessionManager {
             this.email = email;
             this.fullName = fullName;
             this.accessToken = accessToken;
-            this.requiresEmailConfirmation =
-                    requiresEmailConfirmation;
+            this.requiresEmailConfirmation = requiresEmailConfirmation;
         }
     }
 
     private AuthSessionManager(Context context) {
-
         this.context = context.getApplicationContext();
 
-        this.executor = Executors.newSingleThreadExecutor();
-
-        this.mainHandler = new Handler(Looper.getMainLooper());
-
-        this.preferences = this.context.getSharedPreferences(
+        preferences = this.context.getSharedPreferences(
                 PREF_NAME,
                 Context.MODE_PRIVATE
         );
+
+        executor = Executors.newSingleThreadExecutor();
+        mainHandler = new Handler(Looper.getMainLooper());
     }
 
-    public static synchronized AuthSessionManager getInstance(
-            Context context
-    ) {
-
+    public static synchronized AuthSessionManager getInstance(Context context) {
         if (instance == null) {
             instance = new AuthSessionManager(context);
         }
@@ -124,9 +104,9 @@ public class AuthSessionManager {
         return instance;
     }
 
-    // ==========================================
-    // USER REGISTRATION
-    // ==========================================
+    // =========================================================
+    // REGISTRATION
+    // =========================================================
 
     public void signUp(
             String fullName,
@@ -134,32 +114,30 @@ public class AuthSessionManager {
             String password,
             AuthCallback callback
     ) {
-
         executor.execute(() -> {
-
             try {
-
                 JSONObject body = new JSONObject();
 
                 body.put("email", email.trim());
                 body.put("password", password);
 
                 JSONObject metadata = new JSONObject();
-
                 metadata.put("full_name", fullName.trim());
 
                 body.put("data", metadata);
 
+                String endpoint = "/auth/v1/signup?redirect_to="
+                        + URLEncoder.encode(
+                                AUTH_REDIRECT_URL,
+                                "UTF-8"
+                        );
+
                 JSONObject response = request(
-                        "/auth/v1/signup",
+                        endpoint,
                         "POST",
                         body,
                         null
                 );
-
-                String userId = "";
-                String returnedEmail = email;
-                String accessToken = "";
 
                 JSONObject user = response.optJSONObject("user");
 
@@ -167,68 +145,63 @@ public class AuthSessionManager {
                     user = response;
                 }
 
-                userId = user.optString("id", "");
+                String accessToken =
+                        response.optString("access_token", "");
 
-                returnedEmail = user.optString(
-                        "email",
-                        email
-                );
+                String userId = user.optString("id", "");
+                String returnedEmail = user.optString("email", email);
+                String returnedName = "";
 
-                JSONObject session = response;
+                JSONObject userMetadata =
+                        user.optJSONObject("user_metadata");
 
-                accessToken = session.optString(
-                        "access_token",
-                        ""
-                );
+                if (userMetadata != null) {
+                    returnedName =
+                            userMetadata.optString("full_name", "");
+                }
 
                 if (!accessToken.isEmpty()) {
-
                     saveSession(response);
 
                     deliver(callback, new AuthResult(
                             true,
-                            "Registration successful.",
+                            "Your account has been created successfully.",
                             userId,
                             returnedEmail,
-                            fullName,
+                            returnedName,
                             accessToken,
                             false
                     ));
 
                 } else {
-
                     deliver(callback, new AuthResult(
                             true,
-                            "Registration received. Please check your email to confirm your account.",
+                            "Registration successful. Please check your email and confirm your account.",
                             userId,
                             returnedEmail,
-                            fullName,
+                            returnedName,
                             "",
                             true
                     ));
                 }
 
             } catch (Exception e) {
-
-                deliver(callback, failure(e.getMessage()));
+                deliverFailure(callback, e);
             }
         });
     }
 
-    // ==========================================
-    // USER LOGIN
-    // ==========================================
+    // =========================================================
+    // LOGIN
+    // =========================================================
 
     public void signIn(
             String email,
             String password,
             AuthCallback callback
     ) {
-
         executor.execute(() -> {
-
             try {
-
                 JSONObject body = new JSONObject();
 
                 body.put("email", email.trim());
@@ -250,22 +223,16 @@ public class AuthSessionManager {
                 String fullName = "";
 
                 if (user != null) {
-
                     userId = user.optString("id", "");
-
-                    returnedEmail = user.optString(
-                            "email",
-                            email
-                    );
+                    returnedEmail =
+                            user.optString("email", email);
 
                     JSONObject metadata =
                             user.optJSONObject("user_metadata");
 
                     if (metadata != null) {
-                        fullName = metadata.optString(
-                                "full_name",
-                                ""
-                        );
+                        fullName =
+                                metadata.optString("full_name", "");
                     }
                 }
 
@@ -280,51 +247,40 @@ public class AuthSessionManager {
                 ));
 
             } catch (Exception e) {
-
-                deliver(callback, failure(e.getMessage()));
+                deliverFailure(callback, e);
             }
         });
     }
 
-    // ==========================================
-    // RESTORE EXISTING SESSION
-    // ==========================================
+    // =========================================================
+    // RESTORE SAVED SESSION
+    // =========================================================
 
     public void restoreSession(AuthCallback callback) {
-
         executor.execute(() -> {
-
             try {
-
                 JSONObject savedSession = readSession();
 
                 if (savedSession == null) {
-
                     deliver(callback, failure(
-                            "No saved login session."
+                            "No saved login session was found."
                     ));
-
                     return;
                 }
 
-                String refreshToken = savedSession.optString(
-                        "refresh_token",
-                        ""
-                );
+                String refreshToken =
+                        savedSession.optString("refresh_token", "");
 
                 if (refreshToken.isEmpty()) {
-
                     clearSession();
 
                     deliver(callback, failure(
-                            "Your login session has expired."
+                            "Your saved session has expired. Please log in again."
                     ));
-
                     return;
                 }
 
                 JSONObject body = new JSONObject();
-
                 body.put("refresh_token", refreshToken);
 
                 JSONObject response = request(
@@ -343,19 +299,15 @@ public class AuthSessionManager {
                 String fullName = "";
 
                 if (user != null) {
-
                     userId = user.optString("id", "");
-
                     email = user.optString("email", "");
 
                     JSONObject metadata =
                             user.optJSONObject("user_metadata");
 
                     if (metadata != null) {
-                        fullName = metadata.optString(
-                                "full_name",
-                                ""
-                        );
+                        fullName =
+                                metadata.optString("full_name", "");
                     }
                 }
 
@@ -370,37 +322,195 @@ public class AuthSessionManager {
                 ));
 
             } catch (Exception e) {
-
-                if (e instanceof AuthException
-                        && ((AuthException) e).invalidSession) {
-
-                    clearSession();
-                }
-
-                deliver(callback, failure(e.getMessage()));
+                clearSession();
+                deliverFailure(callback, e);
             }
         });
     }
 
-    // ==========================================
-    // PASSWORD RECOVERY
-    // ==========================================
+    // =========================================================
+    // EMAIL CONFIRMATION DEEP LINK
+    // =========================================================
+
+    public void handleAuthCallback(
+            Uri uri,
+            AuthCallback callback
+    ) {
+        if (uri == null) {
+            deliver(callback, failure(
+                    "The confirmation link is invalid."
+            ));
+            return;
+        }
+
+        executor.execute(() -> {
+            try {
+                String accessToken = getCallbackParameter(
+                        uri,
+                        "access_token"
+                );
+
+                String refreshToken = getCallbackParameter(
+                        uri,
+                        "refresh_token"
+                );
+
+                String errorDescription = getCallbackParameter(
+                        uri,
+                        "error_description"
+                );
+
+                String errorCode = getCallbackParameter(
+                        uri,
+                        "error_code"
+                );
+
+                String error = getCallbackParameter(
+                        uri,
+                        "error"
+                );
+
+                if (!error.isEmpty()
+                        || !errorCode.isEmpty()
+                        || !errorDescription.isEmpty()) {
+
+                    String message = !errorDescription.isEmpty()
+                            ? errorDescription
+                            : (!error.isEmpty() ? error : errorCode);
+
+                    deliver(callback, failure(
+                            "Email confirmation failed: " + message
+                    ));
+                    return;
+                }
+
+                if (accessToken.isEmpty()) {
+                    String authorizationCode =
+                            getCallbackParameter(uri, "code");
+
+                    if (!authorizationCode.isEmpty()) {
+                        deliver(callback, failure(
+                                "The confirmation link returned an authorization code instead of a session. The current authentication flow requires an access-token confirmation link."
+                        ));
+                    } else {
+                        deliver(callback, failure(
+                                "The confirmation link did not contain an access token. Please request a new confirmation email."
+                        ));
+                    }
+
+                    return;
+                }
+
+                if (refreshToken.isEmpty()) {
+                    deliver(callback, failure(
+                            "The confirmation link did not contain a refresh token. Please request a new confirmation email."
+                    ));
+                    return;
+                }
+
+                JSONObject user = request(
+                        "/auth/v1/user",
+                        "GET",
+                        null,
+                        accessToken
+                );
+
+                JSONObject session = new JSONObject();
+
+                session.put("access_token", accessToken);
+                session.put("refresh_token", refreshToken);
+                session.put("token_type", "bearer");
+                session.put("user", user);
+
+                saveSession(session);
+
+                String userId = user.optString("id", "");
+                String email = user.optString("email", "");
+                String fullName = "";
+
+                JSONObject metadata =
+                        user.optJSONObject("user_metadata");
+
+                if (metadata != null) {
+                    fullName =
+                            metadata.optString("full_name", "");
+                }
+
+                deliver(callback, new AuthResult(
+                        true,
+                        "Your email has been confirmed successfully.",
+                        userId,
+                        email,
+                        fullName,
+                        accessToken,
+                        false
+                ));
+
+            } catch (Exception e) {
+                deliverFailure(callback, e);
+            }
+        });
+    }
+
+    private String getCallbackParameter(Uri uri, String name)
+            throws Exception {
+
+        String value = uri.getQueryParameter(name);
+
+        if (value != null && !value.isEmpty()) {
+            return value;
+        }
+
+        String fragment = uri.getFragment();
+
+        if (fragment == null || fragment.isEmpty()) {
+            return "";
+        }
+
+        String[] parameters = fragment.split("&");
+
+        for (String parameter : parameters) {
+            String[] parts = parameter.split("=", 2);
+
+            if (parts.length == 2) {
+                String key = URLDecoder.decode(
+                        parts[0],
+                        "UTF-8"
+                );
+
+                if (name.equals(key)) {
+                    return URLDecoder.decode(
+                            parts[1],
+                            "UTF-8"
+                    );
+                }
+            }
+        }
+
+        return "";
+    }
+
+    // =========================================================
+    // PASSWORD RESET
+    // =========================================================
 
     public void sendPasswordReset(
             String email,
             AuthCallback callback
     ) {
-
         executor.execute(() -> {
-
             try {
-
                 JSONObject body = new JSONObject();
-
                 body.put("email", email.trim());
 
+                String endpoint = "/auth/v1/recover?redirect_to="
+                        + URLEncoder.encode(
+                                AUTH_REDIRECT_URL,
+                                "UTF-8"
+                        );
+
                 request(
-                        "/auth/v1/recover",
+                        endpoint,
                         "POST",
                         body,
                         null
@@ -408,7 +518,7 @@ public class AuthSessionManager {
 
                 deliver(callback, new AuthResult(
                         true,
-                        "If an account exists for this email, a password reset message will be sent.",
+                        "If an account exists for that email, a password-reset message has been sent.",
                         "",
                         email,
                         "",
@@ -417,44 +527,34 @@ public class AuthSessionManager {
                 ));
 
             } catch (Exception e) {
-
-                deliver(callback, failure(e.getMessage()));
+                deliverFailure(callback, e);
             }
         });
     }
 
-    // ==========================================
+    // =========================================================
     // LOGOUT
-    // ==========================================
+    // =========================================================
 
     public void signOut(AuthCallback callback) {
-
         executor.execute(() -> {
-
             try {
+                JSONObject session = readSession();
 
-                JSONObject savedSession = readSession();
-
-                if (savedSession != null) {
-
-                    String accessToken = savedSession.optString(
-                            "access_token",
-                            ""
-                    );
+                if (session != null) {
+                    String accessToken =
+                            session.optString("access_token", "");
 
                     if (!accessToken.isEmpty()) {
-
                         try {
-
                             request(
                                     "/auth/v1/logout",
                                     "POST",
                                     new JSONObject(),
                                     accessToken
                             );
-
                         } catch (Exception ignored) {
-                            // Local logout must still succeed.
+                            // Always clear the local session.
                         }
                     }
                 }
@@ -463,7 +563,7 @@ public class AuthSessionManager {
 
                 deliver(callback, new AuthResult(
                         true,
-                        "You have been logged out.",
+                        "You have been signed out.",
                         "",
                         "",
                         "",
@@ -472,40 +572,30 @@ public class AuthSessionManager {
                 ));
 
             } catch (Exception e) {
-
                 clearSession();
-
-                deliver(callback, new AuthResult(
-                        true,
-                        "You have been logged out.",
-                        "",
-                        "",
-                        "",
-                        "",
-                        false
-                ));
+                deliverFailure(callback, e);
             }
         });
     }
 
-    // ==========================================
-    // CHECK LOCAL SESSION
-    // ==========================================
-
     public boolean hasSavedSession() {
+        try {
+            JSONObject session = readSession();
 
-        JSONObject session = readSession();
+            return session != null
+                    && !session.optString(
+                            "refresh_token",
+                            ""
+                    ).isEmpty();
 
-        return session != null
-                && !session.optString(
-                        "refresh_token",
-                        ""
-                ).isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
     }
 
-    // ==========================================
-    // SUPABASE HTTP CONNECTION
-    // ==========================================
+    // =========================================================
+    // SUPABASE HTTP REQUEST
+    // =========================================================
 
     private JSONObject request(
             String endpoint,
@@ -514,165 +604,121 @@ public class AuthSessionManager {
             String accessToken
     ) throws Exception {
 
-        HttpURLConnection connection = null;
+        URL url = new URL(SUPABASE_URL + endpoint);
 
-        try {
+        HttpURLConnection connection =
+                (HttpURLConnection) url.openConnection();
 
-            URL url = new URL(
-                    SUPABASE_URL + endpoint
-            );
+        connection.setRequestMethod(method);
+        connection.setConnectTimeout(TIMEOUT);
+        connection.setReadTimeout(TIMEOUT);
 
-            connection = (HttpURLConnection)
-                    url.openConnection();
+        connection.setRequestProperty(
+                "apikey",
+                SUPABASE_KEY
+        );
 
-            connection.setRequestMethod(method);
+        connection.setRequestProperty(
+                "Content-Type",
+                "application/json"
+        );
 
-            connection.setConnectTimeout(TIMEOUT);
+        connection.setRequestProperty(
+                "Accept",
+                "application/json"
+        );
 
-            connection.setReadTimeout(TIMEOUT);
-
+        if (accessToken != null && !accessToken.isEmpty()) {
             connection.setRequestProperty(
-                    "apikey",
-                    SUPABASE_KEY
+                    "Authorization",
+                    "Bearer " + accessToken
             );
+        }
 
-            connection.setRequestProperty(
-                    "Content-Type",
-                    "application/json"
-            );
+        if (body != null) {
+            connection.setDoOutput(true);
 
-            connection.setRequestProperty(
-                    "Accept",
-                    "application/json"
-            );
+            try (OutputStream output =
+                         connection.getOutputStream()) {
 
-            if (accessToken != null
-                    && !accessToken.isEmpty()) {
-
-                connection.setRequestProperty(
-                        "Authorization",
-                        "Bearer " + accessToken
-                );
-            }
-
-            if (body != null) {
-
-                connection.setDoOutput(true);
-
-                byte[] data = body.toString().getBytes(
-                        StandardCharsets.UTF_8
-                );
-
-                try (OutputStream output =
-                             connection.getOutputStream()) {
-
-                    output.write(data);
-                    output.flush();
-                }
-            }
-
-            int status = connection.getResponseCode();
-
-            InputStream stream;
-
-            if (status >= 200 && status < 300) {
-                stream = connection.getInputStream();
-            } else {
-                stream = connection.getErrorStream();
-            }
-
-            String responseText = readStream(stream);
-
-            JSONObject response;
-
-            try {
-
-                response = responseText.isEmpty()
-                        ? new JSONObject()
-                        : new JSONObject(responseText);
-
-            } catch (JSONException e) {
-
-                throw new Exception(
-                        "Invalid response received from Supabase."
-                );
-            }
-
-            if (status < 200 || status >= 300) {
-
-                String message = response.optString(
-                        "msg",
-                        response.optString(
-                                "message",
-                                response.optString(
-                                        "error_description",
-                                        response.optString(
-                                                "error",
-                                                "Authentication request failed."
-                                        )
-                                )
+                output.write(
+                        body.toString().getBytes(
+              StandardCharsets.UTF_8
                         )
                 );
-
-                throw new AuthException(
-                        message,
-                        status == 400 || status == 401
-                );
-            }
-
-            return response;
-
-        } finally {
-
-            if (connection != null) {
-                connection.disconnect();
             }
         }
+
+        int statusCode = connection.getResponseCode();
+
+        InputStream inputStream =
+                statusCode >= 200 && statusCode < 300
+                        ? connection.getInputStream()
+                        : connection.getErrorStream();
+
+        StringBuilder responseText = new StringBuilder();
+
+        if (inputStream != null) {
+            try (BufferedReader reader =
+                         new BufferedReader(
+                                 new InputStreamReader(
+                                         inputStream,
+                                         StandardCharsets.UTF_8
+                                 )
+                         )) {
+
+                String line;
+
+                while ((line = reader.readLine()) != null) {
+                    responseText.append(line);
+                }
+            }
+        }
+
+        connection.disconnect();
+
+        JSONObject response;
+
+        try {
+            response = responseText.length() > 0
+                    ? new JSONObject(responseText.toString())
+                    : new JSONObject();
+
+        } catch (Exception e) {
+            response = new JSONObject();
+        }
+
+        if (statusCode < 200 || statusCode >= 300) {
+            String message = response.optString(
+                    "msg",
+                    response.optString(
+                            "message",
+                            response.optString(
+                                    "error_description",
+                                    response.optString(
+                                            "error",
+                                            "Authentication request failed."
+                                    )
+                            )
+                    )
+            );
+
+            throw new AuthException(message);
+        }
+
+        return response;
     }
 
-    private String readStream(InputStream stream)
-            throws Exception {
-
-        if (stream == null) {
-            return "";
-        }
-
-        StringBuilder result = new StringBuilder();
-
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(
-                        stream,
-                        StandardCharsets.UTF_8
-                )
-        )) {
-
-            String line;
-
-            while ((line = reader.readLine()) != null) {
-                result.append(line);
-            }
-        }
-
-        return result.toString();
-    }
-
-    // ==========================================
+    // =========================================================
     // ENCRYPTED SESSION STORAGE
-    // ==========================================
+    // =========================================================
 
-    private void saveSession(JSONObject session)
-            throws Exception {
+    private void saveSession(JSONObject session) throws Exception {
+        SecretKey secretKey = getOrCreateSecretKey();
 
-        SecretKey key = getEncryptionKey();
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
 
-        Cipher cipher = Cipher.getInstance(
-                "AES/GCM/NoPadding"
-        );
-
-        cipher.init(
-                Cipher.ENCRYPT_MODE,
-                key
-        );
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey);
 
         byte[] encrypted = cipher.doFinal(
                 session.toString().getBytes(
@@ -700,125 +746,103 @@ public class AuthSessionManager {
                 .apply();
     }
 
-    private JSONObject readSession() {
-
-        try {
-
-            String encryptedText = preferences.getString(
-                    SESSION_KEY,
-                    null
-            );
-
-            String ivText = preferences.getString(
-                    IV_KEY,
-                    null
-            );
-
-            if (encryptedText == null || ivText == null) {
-                return null;
-            }
-
-            byte[] encrypted = Base64.decode(
-                    encryptedText,
-                    Base64.NO_WRAP
-            );
-
-            byte[] iv = Base64.decode(
-                    ivText,
-                    Base64.NO_WRAP
-            );
-
-            SecretKey key = getEncryptionKey();
-
-            Cipher cipher = Cipher.getInstance(
-                    "AES/GCM/NoPadding"
-            );
-
-            GCMParameterSpec spec =
-                    new GCMParameterSpec(128, iv);
-
-            cipher.init(
-                    Cipher.DECRYPT_MODE,
-                    key,
-                    spec
-            );
-
-            byte[] decrypted = cipher.doFinal(encrypted);
-
-            String json = new String(
-                    decrypted,
-                    StandardCharsets.UTF_8
-            );
-
-            return new JSONObject(json);
-
-        } catch (Exception e) {
-
-            clearSession();
-
-            return null;
-        }
-    }
-
-    private SecretKey getEncryptionKey()
-            throws Exception {
-
-        KeyStore keyStore = KeyStore.getInstance(
-                "AndroidKeyStore"
+    private JSONObject readSession() throws Exception {
+        String encryptedText = preferences.getString(
+                SESSION_KEY,
+                null
         );
 
+        String ivText = preferences.getString(
+                IV_KEY,
+                null
+        );
+
+        if (encryptedText == null || ivText == null) {
+            return null;
+        }
+
+        byte[] encrypted = Base64.decode(
+                encryptedText,
+                Base64.NO_WRAP
+        );
+
+        byte[] iv = Base64.decode(
+                ivText,
+                Base64.NO_WRAP
+        );
+
+        SecretKey secretKey = getOrCreateSecretKey();
+
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+
+        cipher.init(
+                Cipher.DECRYPT_MODE,
+                secretKey,
+                new GCMParameterSpec(128, iv)
+        );
+
+        byte[] decrypted = cipher.doFinal(encrypted);
+
+        return new JSONObject(
+                new String(
+                        decrypted,
+                        StandardCharsets.UTF_8
+                )
+        );
+    }
+
+    private SecretKey getOrCreateSecretKey() throws Exception {
+        KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
         keyStore.load(null);
 
         if (keyStore.containsAlias(KEY_ALIAS)) {
-
             return (SecretKey) keyStore.getKey(
                     KEY_ALIAS,
                     null
             );
         }
 
-        KeyGenerator generator = KeyGenerator.getInstance(
-                KeyProperties.KEY_ALGORITHM_AES,
-                "AndroidKeyStore"
-        );
+        KeyGenerator keyGenerator =
+                KeyGenerator.getInstance(
+                        "AES",
+                        "AndroidKeyStore"
+                );
 
-        KeyGenParameterSpec specification =
-                new KeyGenParameterSpec.Builder(
+        android.security.keystore.KeyGenParameterSpec specification =
+                new android.security.keystore.KeyGenParameterSpec.Builder(
                         KEY_ALIAS,
-                        KeyProperties.PURPOSE_ENCRYPT
-                                | KeyProperties.PURPOSE_DECRYPT
+                        android.security.keystore.KeyProperties.PURPOSE_ENCRYPT
+                                | android.security.keystore.KeyProperties.PURPOSE_DECRYPT
                 )
                         .setBlockModes(
-                                KeyProperties.BLOCK_MODE_GCM
+                                android.security.keystore.KeyProperties.BLOCK_MODE_GCM
                         )
                         .setEncryptionPaddings(
-                                KeyProperties.ENCRYPTION_PADDING_NONE
+                                android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE
                         )
                         .setRandomizedEncryptionRequired(true)
                         .build();
 
-        generator.init(specification);
+        keyGenerator.init(specification);
 
-        return generator.generateKey();
+        return keyGenerator.generateKey();
     }
 
     private void clearSession() {
-
         preferences.edit()
                 .remove(SESSION_KEY)
                 .remove(IV_KEY)
                 .apply();
     }
 
-    // ==========================================
+    // =========================================================
     // CALLBACK HELPERS
-    // ==========================================
+    // =========================================================
 
     private void deliver(
             AuthCallback callback,
             AuthResult result
     ) {
-
         if (callback == null) {
             return;
         }
@@ -826,13 +850,23 @@ public class AuthSessionManager {
         mainHandler.post(() -> callback.onComplete(result));
     }
 
-    private AuthResult failure(String message) {
+    private void deliverFailure(
+            AuthCallback callback,
+            Exception exception
+    ) {
+        String message = exception.getMessage();
 
+        if (message == null || message.trim().isEmpty()) {
+            message = "An unexpected authentication error occurred.";
+        }
+
+        deliver(callback, failure(message));
+    }
+
+    private AuthResult failure(String message) {
         return new AuthResult(
                 false,
-                message == null
-                        ? "An unexpected authentication error occurred."
-                        : message,
+                message,
                 "",
                 "",
                 "",
@@ -842,17 +876,8 @@ public class AuthSessionManager {
     }
 
     private static class AuthException extends Exception {
-
-        final boolean invalidSession;
-
-        AuthException(
-                String message,
-                boolean invalidSession
-        ) {
-
+        AuthException(String message) {
             super(message);
-
-            this.invalidSession = invalidSession;
         }
     }
 }
