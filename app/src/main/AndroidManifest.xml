@@ -40,7 +40,8 @@
     </queries>
 
     <application
-
+android:icon="@drawable/p_ai_launcher"
+android:roundIcon="@drawable/p_ai_launcher"
         android:name=".PAIApplication"
 
         android:allowBackup="false"
