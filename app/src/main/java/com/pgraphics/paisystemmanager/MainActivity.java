@@ -74,6 +74,10 @@ public class MainActivity extends Activity {
 
     private static final String HISTORY_PREFS = "pai_conversation_history";
     private static final String HISTORY_KEY = "messages";
+    private static final String CONVERSATIONS_PREFS = "pai_conversations";
+    private static final String CONVERSATIONS_KEY = "sessions";
+    private static final String ACTIVE_CONVERSATION_KEY = "active_id";
+    private static final int MAX_CONVERSATIONS = 100;
     private static final int MAX_SAVED_MESSAGES = 500;
     private static final int MAX_CONTEXT_HISTORY_MESSAGES = 20;
     private static final int MAX_CONTEXT_ITEM_LENGTH = 4000;
@@ -96,7 +100,8 @@ public class MainActivity extends Activity {
     private TextView statusText;
     private Button sendButton;
     private Button voiceButton;
-    private Button clearHistoryButton;
+    private Button newChatButton;
+    private Button chatHistoryButton;
 
     // ---------------------------------------------------------------------
     // System components
@@ -116,7 +121,10 @@ public class MainActivity extends Activity {
     private boolean textToSpeechReady = false;
 
     private SharedPreferences historyPreferences;
+    private SharedPreferences conversationsPreferences;
+    private JSONArray conversations;
     private JSONArray conversationHistory;
+    private String activeConversationId;
 
     private Button activeSpeechButton;
     private String activeSpeechRequestId;
@@ -134,7 +142,11 @@ public class MainActivity extends Activity {
                 HISTORY_PREFS,
                 MODE_PRIVATE
         );
-        loadConversationHistory();
+        conversationsPreferences = getSharedPreferences(
+                CONVERSATIONS_PREFS,
+                MODE_PRIVATE
+        );
+        loadConversations();
 
         buildInterface();
         initializeTextToSpeech();
@@ -208,16 +220,36 @@ public class MainActivity extends Activity {
                 )
         );
 
-        clearHistoryButton = createButton("CLEAR CHAT HISTORY");
-        clearHistoryButton.setTextSize(11);
-        clearHistoryButton.setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(
-                        Color.rgb(65, 65, 75)
-                )
+        LinearLayout conversationToolbar = new LinearLayout(this);
+        conversationToolbar.setOrientation(LinearLayout.HORIZONTAL);
+
+        newChatButton = createButton("+ NEW CHAT");
+        chatHistoryButton = createButton("CHAT HISTORY");
+        newChatButton.setTextSize(11);
+        chatHistoryButton.setTextSize(11);
+        newChatButton.setTextColor(Color.WHITE);
+        chatHistoryButton.setTextColor(Color.WHITE);
+        newChatButton.setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(Color.rgb(65, 65, 75))
         );
-        clearHistoryButton.setTextColor(Color.WHITE);
-        clearHistoryButton.setOnClickListener(v -> confirmClearHistory());
-        rootLayout.addView(clearHistoryButton);
+        chatHistoryButton.setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(Color.rgb(65, 65, 75))
+        );
+
+        LinearLayout.LayoutParams newChatParams =
+                new LinearLayout.LayoutParams(0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        newChatParams.setMargins(dp(3), dp(2), dp(3), dp(5));
+        LinearLayout.LayoutParams historyParams =
+                new LinearLayout.LayoutParams(0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        historyParams.setMargins(dp(3), dp(2), dp(3), dp(5));
+        conversationToolbar.addView(newChatButton, newChatParams);
+        conversationToolbar.addView(chatHistoryButton, historyParams);
+        rootLayout.addView(conversationToolbar);
+
+        newChatButton.setOnClickListener(v -> createNewConversation());
+        chatHistoryButton.setOnClickListener(v -> showConversationHistory());
 
         chatScroll = new ScrollView(this);
         chatScroll.setFillViewport(true);
@@ -255,7 +287,6 @@ public class MainActivity extends Activity {
         messageInput.setHintTextColor(Color.GRAY);
         messageInput.setTextSize(16);
         messageInput.setSingleLine(false);
-
         messageInput.setMinLines(2);
         messageInput.setMaxLines(5);
         messageInput.setGravity(Gravity.TOP | Gravity.START);
@@ -432,178 +463,332 @@ public class MainActivity extends Activity {
     }
 
     // ---------------------------------------------------------------------
-    // Local conversation history
+    // Multiple conversations and private local storage
     // ---------------------------------------------------------------------
 
-    private void loadConversationHistory() {
-        String savedJson = historyPreferences.getString(HISTORY_KEY, "[]");
+    private void loadConversations() {
+        String saved = conversationsPreferences.getString(
+                CONVERSATIONS_KEY, "[]");
         try {
-            conversationHistory = new JSONArray(savedJson);
+            conversations = new JSONArray(saved);
         } catch (JSONException e) {
-            // Recover safely if the stored history is damaged.
+            conversations = new JSONArray();
+        }
+
+        activeConversationId = conversationsPreferences.getString(
+                ACTIVE_CONVERSATION_KEY, null);
+
+        // Migrate the previous single-chat history without deleting it.
+        if (conversations.length() == 0) {
+            String oldHistory = historyPreferences.getString(HISTORY_KEY, "[]");
+            try {
+                JSONArray oldMessages = new JSONArray(oldHistory);
+                if (oldMessages.length() > 0) {
+                    JSONObject migrated = new JSONObject();
+                    String id = UUID.randomUUID().toString();
+                    migrated.put("id", id);
+                    migrated.put("title", deriveConversationTitle(oldMessages));
+                    migrated.put("createdAt", System.currentTimeMillis());
+                    migrated.put("updatedAt", System.currentTimeMillis());
+                    migrated.put("messages", oldMessages);
+                    conversations.put(migrated);
+                    activeConversationId = id;
+                }
+            } catch (JSONException ignored) {
+                // A damaged legacy history must not prevent app startup.
+            }
+        }
+
+        if (findConversation(activeConversationId) == null
+                && conversations.length() > 0) {
+            JSONObject mostRecent = conversations.optJSONObject(
+                    conversations.length() - 1);
+            activeConversationId = mostRecent == null
+                    ? null : mostRecent.optString("id", null);
+        }
+
+        if (conversations.length() == 0 || findConversation(activeConversationId) == null) {
+            createConversationRecord("New chat");
+        } else {
+            loadActiveConversationMessages();
+        }
+        trimConversationLimit();
+        saveConversations();
+    }
+
+    private JSONObject createConversationRecord(String title) {
+        JSONObject conversation = new JSONObject();
+        String id = UUID.randomUUID().toString();
+        long now = System.currentTimeMillis();
+        try {
+            conversation.put("id", id);
+            conversation.put("title", title);
+            conversation.put("createdAt", now);
+            conversation.put("updatedAt", now);
+            conversation.put("messages", new JSONArray());
+            conversations.put(conversation);
+            activeConversationId = id;
+            conversationHistory = conversation.optJSONArray("messages");
+            trimConversationLimit();
+            saveConversations();
+            return conversation;
+        } catch (JSONException e) {
             conversationHistory = new JSONArray();
-            historyPreferences.edit().putString(HISTORY_KEY, "[]").apply();
+            return null;
         }
     }
 
-    private void restoreConversationHistory() {
-        if (conversationHistory == null || conversationHistory.length() == 0) {
-            addChatMessage(
-                    "P AI",
-                    "Hello! I am P AI, your personal assistant. How can I help you?"
-            );
+    private JSONObject findConversation(String id) {
+        if (id == null || conversations == null) return null;
+        for (int i = 0; i < conversations.length(); i++) {
+            JSONObject item = conversations.optJSONObject(i);
+            if (item != null && id.equals(item.optString("id", ""))) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    private void loadActiveConversationMessages() {
+        JSONObject active = findConversation(activeConversationId);
+        if (active == null) {
+            conversationHistory = new JSONArray();
             return;
         }
+        JSONArray messages = active.optJSONArray("messages");
+        conversationHistory = messages == null ? new JSONArray() : messages;
+    }
 
+    private void saveConversations() {
+        if (conversations == null) conversations = new JSONArray();
+        conversationsPreferences.edit()
+                .putString(CONVERSATIONS_KEY, conversations.toString())
+                .putString(ACTIVE_CONVERSATION_KEY, activeConversationId == null ? "" : activeConversationId)
+                .apply();
+    }
+
+    private void trimConversationLimit() {
+        while (conversations.length() > MAX_CONVERSATIONS) {
+            JSONObject oldest = conversations.optJSONObject(0);
+            String oldestId = oldest == null ? "" : oldest.optString("id", "");
+            // Never evict the active chat while enforcing the storage limit.
+            conversations.remove(oldestId.equals(activeConversationId) ? 1 : 0);
+        }
+    }
+
+    private String deriveConversationTitle(JSONArray messages) {
+        if (messages != null) {
+            for (int i = 0; i < messages.length(); i++) {
+                JSONObject item = messages.optJSONObject(i);
+                if (item != null && "You".equalsIgnoreCase(
+                        item.optString("sender", ""))) {
+                    String text = item.optString("message", "").trim();
+                    if (!text.isEmpty()) return shortenTitle(text);
+                }
+            }
+        }
+        return "Previous conversation";
+    }
+
+    private String shortenTitle(String text) {
+        String clean = text.replaceAll("\\s+", " ").trim();
+        if (clean.length() > 38) return clean.substring(0, 35) + "...";
+        return clean.isEmpty() ? "New chat" : clean;
+    }
+
+    private void restoreConversationHistory() {
+        loadActiveConversationMessages();
+        if (conversationHistory == null || conversationHistory.length() == 0) {
+            addChatMessage("P AI",
+                    "Hello! I am P AI, your personal assistant. How can I help you?");
+            return;
+        }
         for (int i = 0; i < conversationHistory.length(); i++) {
             JSONObject item = conversationHistory.optJSONObject(i);
-            if (item == null) {
-                continue;
+            if (item != null) {
+                renderChatMessage(item.optString("sender", "System"),
+                        item.optString("message", ""));
             }
-
-            String sender = item.optString("sender", "System");
-            String message = item.optString("message", "");
-            renderChatMessage(sender, message);
         }
     }
 
     private void persistChatMessage(String sender, String message) {
-        if (conversationHistory == null) {
-            conversationHistory = new JSONArray();
-        }
-
+        if (conversationHistory == null) conversationHistory = new JSONArray();
         try {
             JSONObject item = new JSONObject();
             item.put("sender", sender);
             item.put("message", message);
             item.put("timestamp", System.currentTimeMillis());
             conversationHistory.put(item);
-
-            // Bound storage growth while preserving the newest conversation.
             while (conversationHistory.length() > MAX_SAVED_MESSAGES) {
                 conversationHistory.remove(0);
             }
 
-            historyPreferences.edit()
-                    .putString(HISTORY_KEY, conversationHistory.toString())
-                    .apply();
+            JSONObject active = findConversation(activeConversationId);
+            if (active != null) {
+                active.put("messages", conversationHistory);
+                active.put("updatedAt", System.currentTimeMillis());
+                if ("New chat".equals(active.optString("title", "New chat"))
+                        && "You".equalsIgnoreCase(sender)) {
+                    active.put("title", shortenTitle(message));
+                }
+            }
+            saveConversations();
         } catch (JSONException e) {
-            showMessage("P AI could not save this message to local history.");
+            showMessage("P AI could not save this message locally.");
         }
     }
 
-    /**
-     * Creates a bounded, chronological snapshot of earlier chat messages.
-     * The current question is deliberately excluded because the API adds it
-     * as the final user message itself.
-     */
-    private JSONArray buildContextHistory(String currentQuestion) {
-        JSONArray result = new JSONArray();
-        List<JSONObject> eligibleMessages = new ArrayList<>();
-
-        if (conversationHistory == null) {
-            return result;
+    private void createNewConversation() {
+        if (requestInProgress) {
+            showMessage("Please wait for P AI to finish the current response.");
+            return;
         }
-
-        for (int i = 0; i < conversationHistory.length(); i++) {
-            JSONObject saved = conversationHistory.optJSONObject(i);
-            if (saved == null) {
-                continue;
-            }
-
-            String sender = saved.optString("sender", "");
-            String content = saved.optString("message", "").trim();
-
-            if (content.isEmpty()) {
-                continue;
-            }
-
-            String role;
-            if ("You".equalsIgnoreCase(sender)) {
-                role = "user";
-            } else if ("P AI".equalsIgnoreCase(sender)) {
-                role = "assistant";
-            } else {
-                // System notices and errors are not conversational context.
-                continue;
-            }
-
-            if (content.length() > MAX_CONTEXT_ITEM_LENGTH) {
-                content = content.substring(
-                        content.length() - MAX_CONTEXT_ITEM_LENGTH
-                );
-            }
-
-            try {
-                JSONObject entry = new JSONObject();
-                entry.put("role", role);
-                entry.put("content", content);
-                eligibleMessages.add(entry);
-            } catch (JSONException ignored) {
-                // Skip a malformed item without interrupting the request.
-            }
-        }
-
-        // The question was just saved locally before this snapshot was made.
-        // Remove that final duplicate; the backend appends it exactly once.
-        if (!eligibleMessages.isEmpty()) {
-            JSONObject last = eligibleMessages.get(
-                    eligibleMessages.size() - 1
-            );
-            if ("user".equals(last.optString("role", ""))
-                    && currentQuestion.equals(
-                            last.optString("content", ""))) {
-                eligibleMessages.remove(eligibleMessages.size() - 1);
-            }
-        }
-
-        // Work backwards so the newest useful context always gets priority.
-        List<JSONObject> newestFirst = new ArrayList<>();
-        int totalCharacters = 0;
-        for (int i = eligibleMessages.size() - 1;
-                i >= 0
-                && newestFirst.size() < MAX_CONTEXT_HISTORY_MESSAGES;
-                i--) {
-            JSONObject entry = eligibleMessages.get(i);
-            String content = entry.optString("content", "");
-            if (totalCharacters + content.length()
-                    > MAX_CONTEXT_TOTAL_LENGTH) {
-                break;
-            }
-            newestFirst.add(entry);
-            totalCharacters += content.length();
-        }
-
-        for (int i = newestFirst.size() - 1; i >= 0; i--) {
-            result.put(newestFirst.get(i));
-        }
-
-        return result;
+        stopCurrentSpeech();
+        createConversationRecord("New chat");
+        chatContainer.removeAllViews();
+        addChatMessage("P AI",
+                "Hello! I am P AI, your personal assistant. How can I help you?");
+        updateStatus("New conversation");
     }
 
-    private void confirmClearHistory() {
+    private void showConversationHistory() {
+        if (requestInProgress) {
+            showMessage("Please wait until the current response is complete.");
+            return;
+        }
+        if (conversations == null || conversations.length() == 0) {
+            showMessage("No saved conversations yet.");
+            return;
+        }
+
+        final String[] ids = new String[conversations.length()];
+        String[] titles = new String[conversations.length()];
+        for (int i = conversations.length() - 1, display = 0; i >= 0; i--, display++) {
+            JSONObject item = conversations.optJSONObject(i);
+            ids[display] = item == null ? "" : item.optString("id", "");
+            String title = item == null ? "Untitled chat" : item.optString("title", "New chat");
+            titles[display] = (ids[display].equals(activeConversationId) ? "✓  " : "") + title;
+        }
+
         new AlertDialog.Builder(this)
-                .setTitle("Clear conversation history?")
-                .setMessage(
-                        "This will permanently delete the saved chat on this device. "
-                                + "This action cannot be undone."
-                )
-                .setNegativeButton("CANCEL", (dialog, which) -> dialog.dismiss())
-                .setPositiveButton("CLEAR", (dialog, which) -> clearConversationHistory())
+                .setTitle("CHAT HISTORY")
+                .setItems(titles, (dialog, which) -> showConversationOptions(ids[which]))
+                .setNegativeButton("CLOSE", null)
                 .show();
     }
 
-    private void clearConversationHistory() {
-        conversationHistory = new JSONArray();
-        historyPreferences.edit().remove(HISTORY_KEY).apply();
+    private void showConversationOptions(String conversationId) {
+        JSONObject selected = findConversation(conversationId);
+        if (selected == null) return;
+        String title = selected.optString("title", "New chat");
+        String[] actions = {"OPEN CHAT", "RENAME CHAT", "DELETE CHAT"};
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setItems(actions, (dialog, which) -> {
+                    if (which == 0) openConversation(conversationId);
+                    else if (which == 1) renameConversation(conversationId);
+                    else confirmDeleteConversation(conversationId);
+                })
+                .setNegativeButton("CANCEL", null)
+                .show();
+    }
 
-        if (chatContainer != null) {
-            chatContainer.removeAllViews();
-        }
-
+    private void openConversation(String conversationId) {
+        if (requestInProgress) return;
+        JSONObject selected = findConversation(conversationId);
+        if (selected == null) return;
         stopCurrentSpeech();
-        updateStatus("Conversation history cleared");
-        showMessage("Your conversation history has been cleared.");
+        activeConversationId = conversationId;
+        loadActiveConversationMessages();
+        chatContainer.removeAllViews();
+        for (int i = 0; i < conversationHistory.length(); i++) {
+            JSONObject item = conversationHistory.optJSONObject(i);
+            if (item != null) renderChatMessage(
+                    item.optString("sender", "System"),
+                    item.optString("message", ""));
+        }
+        saveConversations();
+        updateStatus("Opened: " + selected.optString("title", "Chat"));
+    }
+
+    private void renameConversation(String conversationId) {
+        JSONObject selected = findConversation(conversationId);
+        if (selected == null) return;
+        EditText titleInput = new EditText(this);
+        titleInput.setSingleLine(true);
+        titleInput.setText(selected.optString("title", "New chat"));
+        titleInput.setSelection(titleInput.getText().length());
+        int padding = dp(20);
+        LinearLayout holder = new LinearLayout(this);
+        holder.setPadding(padding, dp(4), padding, 0);
+        holder.addView(titleInput);
+        new AlertDialog.Builder(this)
+                .setTitle("RENAME CHAT")
+                .setView(holder)
+                .setNegativeButton("CANCEL", null)
+                .setPositiveButton("SAVE", (dialog, which) -> {
+                    String name = titleInput.getText().toString().trim();
+                    if (name.isEmpty()) {
+                        showMessage("Chat title cannot be empty.");
+                        return;
+                    }
+                    try {
+                        selected.put("title", shortenTitle(name));
+                        selected.put("updatedAt", System.currentTimeMillis());
+                        saveConversations();
+                        if (conversationId.equals(activeConversationId)) {
+                            updateStatus("Chat renamed: " + shortenTitle(name));
+                        }
+                    } catch (JSONException e) {
+                        showMessage("Unable to rename this chat.");
+                    }
+                })
+                .show();
+    }
+
+    private void confirmDeleteConversation(String conversationId) {
+        JSONObject selected = findConversation(conversationId);
+        if (selected == null) return;
+        String title = selected.optString("title", "this chat");
+        new AlertDialog.Builder(this)
+                .setTitle("DELETE CHAT?")
+                .setMessage("Permanently delete \"" + title + "\"? This cannot be undone.")
+                .setNegativeButton("CANCEL", null)
+                .setPositiveButton("DELETE", (dialog, which) -> deleteConversation(conversationId))
+                .show();
+    }
+
+    private void deleteConversation(String conversationId) {
+        if (requestInProgress) {
+            showMessage("Wait for the current response before deleting a chat.");
+            return;
+        }
+        int removeIndex = -1;
+        for (int i = 0; i < conversations.length(); i++) {
+            JSONObject item = conversations.optJSONObject(i);
+            if (item != null && conversationId.equals(item.optString("id", ""))) {
+                removeIndex = i;
+                break;
+            }
+        }
+        if (removeIndex < 0) return;
+        boolean deletingActive = conversationId.equals(activeConversationId);
+        conversations.remove(removeIndex);
+        if (deletingActive) {
+            if (conversations.length() == 0) {
+                createConversationRecord("New chat");
+            } else {
+                JSONObject next = conversations.optJSONObject(conversations.length() - 1);
+                activeConversationId = next == null ? null : next.optString("id", null);
+                loadActiveConversationMessages();
+            }
+            chatContainer.removeAllViews();
+            restoreConversationHistory();
+        }
+        saveConversations();
+        updateStatus("Conversation deleted");
+        showMessage("Chat deleted.");
     }
 
     // ---------------------------------------------------------------------
@@ -771,7 +956,6 @@ public class MainActivity extends Activity {
                     chunks.get(i),
                     queueMode,
                     null,
-
                     utteranceId
             );
 
