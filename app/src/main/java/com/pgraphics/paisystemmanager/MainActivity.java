@@ -38,23 +38,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/**
- * P AI SYSTEM MANAGER
- *
- * Main chat screen.
- *
- * Responsibilities:
- * - Online AI communication.
- * - Manual online speech recognition.
- * - User-controlled text-to-speech.
- * - Installed application launching.
- * - Network and error handling.
- */
 public class MainActivity extends Activity {
-
-    // ============================================================
-    // CONFIGURATION
-    // ============================================================
 
     private static final String API_URL =
             "https://p-ai-system-manager-api.vercel.app/api/chat";
@@ -72,56 +56,33 @@ public class MainActivity extends Activity {
     private static final int ACCENT_COLOR =
             Color.rgb(230, 180, 70);
 
-    // ============================================================
-    // USER INTERFACE
-    // ============================================================
-
     private LinearLayout rootLayout;
     private LinearLayout chatContainer;
     private ScrollView chatScroll;
-
     private EditText messageInput;
-
     private TextView statusText;
-
     private Button sendButton;
     private Button voiceButton;
-
-    // ============================================================
-    // SYSTEM COMPONENTS
-    // ============================================================
 
     private TextToSpeech textToSpeech;
 
     private final ExecutorService aiExecutor =
             Executors.newSingleThreadExecutor();
 
-    // ============================================================
-    // APPLICATION STATE
-    // ============================================================
-
     private volatile boolean isActivityDestroyed = false;
-
     private boolean requestInProgress = false;
     private boolean textToSpeechReady = false;
 
     private Button activeSpeechButton;
-
     private String activeSpeechRequestId;
     private String activeSpeechFinalUtteranceId;
-
-    // ============================================================
-    // ACTIVITY LIFECYCLE
-    // ============================================================
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         buildInterface();
-
         initializeTextToSpeech();
-
         updateStatus("Ready");
     }
 
@@ -136,7 +97,6 @@ public class MainActivity extends Activity {
                 textToSpeech.stop();
                 textToSpeech.shutdown();
             } catch (Exception ignored) {
-                // Speech engine may already be released.
             }
 
             textToSpeech = null;
@@ -147,14 +107,9 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    // ============================================================
-    // INTERFACE CONSTRUCTION
-    // ============================================================
-
     private void buildInterface() {
 
         rootLayout = new LinearLayout(this);
-
         rootLayout.setOrientation(LinearLayout.VERTICAL);
 
         rootLayout.setPadding(
@@ -166,12 +121,9 @@ public class MainActivity extends Activity {
 
         rootLayout.setBackgroundColor(BACKGROUND_COLOR);
 
-        // Application title
-
         TextView title = new TextView(this);
 
         title.setText("P AI SYSTEM MANAGER");
-
         title.setTextSize(22);
 
         title.setTypeface(
@@ -180,7 +132,6 @@ public class MainActivity extends Activity {
         );
 
         title.setTextColor(ACCENT_COLOR);
-
         title.setGravity(Gravity.CENTER);
 
         title.setPadding(
@@ -198,16 +149,11 @@ public class MainActivity extends Activity {
                 )
         );
 
-        // Status display
-
         statusText = new TextView(this);
 
         statusText.setText("Starting P AI...");
-
         statusText.setTextSize(13);
-
         statusText.setTextColor(Color.LTGRAY);
-
         statusText.setGravity(Gravity.CENTER);
 
         statusText.setPadding(
@@ -225,12 +171,9 @@ public class MainActivity extends Activity {
                 )
         );
 
-        // Chat scrolling area
-
         chatScroll = new ScrollView(this);
 
         chatScroll.setFillViewport(true);
-
         chatScroll.setSmoothScrollingEnabled(true);
 
         chatContainer = new LinearLayout(this);
@@ -263,22 +206,15 @@ public class MainActivity extends Activity {
                 )
         );
 
-        // Message input
-
         messageInput = new EditText(this);
 
         messageInput.setHint("Ask P AI anything...");
-
         messageInput.setTextColor(Color.WHITE);
-
         messageInput.setHintTextColor(Color.GRAY);
-
         messageInput.setTextSize(16);
 
         messageInput.setSingleLine(false);
-
         messageInput.setMinLines(2);
-
         messageInput.setMaxLines(5);
 
         messageInput.setGravity(
@@ -300,14 +236,10 @@ public class MainActivity extends Activity {
                 )
         );
 
-        // Action buttons
-
         sendButton = createButton("SEND MESSAGE");
-
         voiceButton = createButton("VOICE INPUT");
 
         rootLayout.addView(sendButton);
-
         rootLayout.addView(voiceButton);
 
         sendButton.setOnClickListener(
@@ -331,11 +263,8 @@ public class MainActivity extends Activity {
         Button button = new Button(this);
 
         button.setText(label);
-
         button.setTextColor(Color.BLACK);
-
         button.setTextSize(13);
-
         button.setAllCaps(false);
 
         button.setBackgroundTintList(
@@ -361,10 +290,6 @@ public class MainActivity extends Activity {
 
         return button;
     }
-
-    // ============================================================
-    // CHAT MESSAGE DISPLAY
-    // ============================================================
 
     private void addChatMessage(
             String sender,
@@ -410,7 +335,6 @@ public class MainActivity extends Activity {
         TextView senderView = new TextView(this);
 
         senderView.setText(sender);
-
         senderView.setTextSize(13);
 
         senderView.setTypeface(
@@ -439,9 +363,7 @@ public class MainActivity extends Activity {
         );
 
         messageView.setTextSize(15);
-
         messageView.setTextColor(Color.WHITE);
-
         messageView.setTextIsSelectable(true);
 
         messageView.setLineSpacing(
@@ -464,20 +386,15 @@ public class MainActivity extends Activity {
                 )
         );
 
-        // Add speaker control only to P AI messages.
-
-if ("P AI".equalsIgnoreCase(sender)
+        if ("P AI".equalsIgnoreCase(sender)
                 && message != null
                 && !message.trim().isEmpty()) {
 
             Button readButton = new Button(this);
 
             readButton.setText("🔊  Read aloud");
-
             readButton.setTextSize(12);
-
             readButton.setAllCaps(false);
-
             readButton.setTextColor(ACCENT_COLOR);
 
             readButton.setBackgroundTintList(
@@ -525,16 +442,12 @@ if ("P AI".equalsIgnoreCase(sender)
                 cardParams
         );
 
-        chatScroll.post(
-                () -> chatScroll.fullScroll(
+        chatScroll.post(() ->
+                chatScroll.fullScroll(
                         ScrollView.FOCUS_DOWN
                 )
         );
     }
-
-    // ============================================================
-    // STATUS AND UTILITY METHODS
-    // ============================================================
 
     private void updateStatus(String message) {
 
@@ -582,13 +495,10 @@ if ("P AI".equalsIgnoreCase(sender)
             }
 
         } catch (Exception ignored) {
-            // Keyboard visibility is not critical.
         }
     }
 
-    // ============================================================
     // TEXT TO SPEECH
-    // ============================================================
 
     private void initializeTextToSpeech() {
 
@@ -636,7 +546,6 @@ if ("P AI".equalsIgnoreCase(sender)
 
                                 @Override
                                 public void onStart(String utteranceId) {
-                                    // Playback started.
                                 }
 
                                 @Override
@@ -650,7 +559,7 @@ if ("P AI".equalsIgnoreCase(sender)
                                 @Override
                                 public void onError(String utteranceId) {
 
-                                    finishSpeechIfCurrent(
+                                    handleSpeechError(
                                             utteranceId
                                     );
                                 }
@@ -661,7 +570,7 @@ if ("P AI".equalsIgnoreCase(sender)
                                         int errorCode
                                 ) {
 
-                                    finishSpeechIfCurrent(
+                                    handleSpeechError(
                                             utteranceId
                                     );
                                 }
@@ -728,10 +637,11 @@ if ("P AI".equalsIgnoreCase(sender)
 
         button.setText("■  Stop reading");
 
-        List<String> chunks = splitTextForSpeech(
-                cleanText,
-                MAX_TTS_CHUNK_LENGTH
-        );
+        List<String> chunks =
+                splitTextForSpeech(
+                        cleanText,
+                        MAX_TTS_CHUNK_LENGTH
+                );
 
         if (chunks.isEmpty()) {
 
@@ -793,25 +703,18 @@ if ("P AI".equalsIgnoreCase(sender)
         while (remaining.length() > maxLength) {
 
             int splitAt =
-                    remaining.lastIndexOf(
-                            ' ',
-                            maxLength
-                    );
+                    remaining.lastIndexOf(' ', maxLength);
 
             if (splitAt <= 0) {
                 splitAt = maxLength;
             }
 
-            // Avoid splitting a UTF-16 surrogate pair.
-
             if (splitAt > 0
                     && splitAt < remaining.length()
                     && Character.isHighSurrogate(
-                            remaining.charAt(splitAt - 1)
-                    )
+                            remaining.charAt(splitAt - 1))
                     && Character.isLowSurrogate(
-                            remaining.charAt(splitAt)
-                    )) {
+                            remaining.charAt(splitAt))) {
 
                 splitAt--;
             }
@@ -831,9 +734,32 @@ if ("P AI".equalsIgnoreCase(sender)
         return chunks;
     }
 
-    private void finishSpeechIfCurrent(
-            String utteranceId
-    ) {
+    private void handleSpeechError(String utteranceId) {
+
+        runOnUiThread(() -> {
+
+            if (isActivityDestroyed
+                    || activeSpeechRequestId == null
+                    || utteranceId == null) {
+
+                return;
+            }
+
+            String currentRequestPrefix =
+                    activeSpeechRequestId + "_part_";
+
+            if (utteranceId.startsWith(currentRequestPrefix)) {
+
+                stopCurrentSpeech();
+
+                showMessage(
+                        "P AI could not finish reading this response."
+                );
+            }
+        });
+    }
+
+    private void finishSpeechIfCurrent(String utteranceId) {
 
         runOnUiThread(() -> {
 
@@ -860,7 +786,6 @@ if ("P AI".equalsIgnoreCase(sender)
                 textToSpeech.stop();
 
             } catch (Exception ignored) {
-                // Continue resetting the interface.
             }
         }
 
@@ -877,17 +802,13 @@ if ("P AI".equalsIgnoreCase(sender)
         }
 
         activeSpeechButton = null;
-
         activeSpeechRequestId = null;
-
         activeSpeechFinalUtteranceId = null;
     }
 
-    // ============================================================
-    // MANUAL ONLINE VOICE INPUT
-    // ============================================================
+    // MANUAL VOICE RECOGNITION
 
-private boolean hasAudioPermission() {
+    private boolean hasAudioPermission() {
 
         return checkSelfPermission(
                 Manifest.permission.RECORD_AUDIO
@@ -1040,9 +961,7 @@ private boolean hasAudioPermission() {
         }
     }
 
-    // ============================================================
     // AI CHAT REQUEST HANDLING
-    // ============================================================
 
     private void sendMessage() {
 
@@ -1074,8 +993,6 @@ private boolean hasAudioPermission() {
 
         hideKeyboard();
 
-        // Handle local app-launch commands.
-
         if (question.toLowerCase(Locale.ROOT)
                 .startsWith("open ")) {
 
@@ -1103,7 +1020,6 @@ private boolean hasAudioPermission() {
         requestInProgress = true;
 
         sendButton.setEnabled(false);
-
         sendButton.setText("PLEASE WAIT...");
 
         updateStatus(
@@ -1155,7 +1071,6 @@ private boolean hasAudioPermission() {
             );
 
             connection.setDoOutput(true);
-
             connection.setUseCaches(false);
 
             connection.setRequestProperty(
@@ -1188,7 +1103,6 @@ private boolean hasAudioPermission() {
                          connection.getOutputStream()) {
 
                 outputStream.write(requestBytes);
-
                 outputStream.flush();
             }
 
@@ -1269,8 +1183,8 @@ private boolean hasAudioPermission() {
 
                 restoreSendButton();
 
-                // Automatic speech is intentionally disabled.
-                // The user must tap the speaker button.
+                // Responses are not spoken automatically.
+                // The user controls speech using each response button.
             });
 
         } catch (Exception e) {
@@ -1294,8 +1208,7 @@ private boolean hasAudioPermission() {
 
                 addChatMessage(
                         "System",
-                        "I couldn't get a response: "
-                                + displayError
+                        "I couldn't get a response: " + displayError
                 );
 
                 updateStatus(
@@ -1334,9 +1247,7 @@ private boolean hasAudioPermission() {
 
             while ((line = reader.readLine()) != null) {
 
-                responseBuilder
-                        .append(line)
-                        .append('\n');
+                responseBuilder.append(line).append('\n');
             }
         }
 
@@ -1355,13 +1266,9 @@ private boolean hasAudioPermission() {
         }
     }
 
-    // ============================================================
     // INSTALLED APPLICATION LAUNCHING
-    // ============================================================
 
-private void openInstalledApplication(
-            String appName
-    ) {
+    private void openInstalledApplication(String appName) {
 
         if (appName == null || appName.trim().isEmpty()) {
 
@@ -1391,7 +1298,6 @@ private void openInstalledApplication(
                     );
 
             ResolveInfo exactMatch = null;
-
             ResolveInfo partialMatch = null;
 
             for (ResolveInfo app : installedApps) {
@@ -1443,9 +1349,7 @@ private void openInstalledApplication(
 
             Intent launchIntent =
                     getPackageManager()
-                            .getLaunchIntentForPackage(
-                                    packageName
-                            );
+                            .getLaunchIntentForPackage(packageName);
 
             if (launchIntent == null) {
 
