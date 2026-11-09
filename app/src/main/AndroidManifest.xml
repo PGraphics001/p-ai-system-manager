@@ -2,12 +2,24 @@
 
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- INTERNET -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- NETWORK -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- MICROPHONE -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- BACKGROUND SERVICE -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <!-- NOTIFICATIONS -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- WAKE LOCK -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <uses-feature
@@ -15,6 +27,7 @@
         android:required="false" />
 
     <queries>
+
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -23,31 +36,65 @@
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
+
     </queries>
 
     <application
+
         android:name=".PAIApplication"
+
         android:allowBackup="false"
+
         android:label="P AI System Manager"
-        android:icon="@drawable/p_ai_launcher"
+
         android:theme="@android:style/Theme.Material.NoActionBar"
+
         android:supportsRtl="true"
+
         android:usesCleartextTraffic="false">
+
+        <!-- AUTHENTICATION ACTIVITY -->
 
         <activity
             android:name=".AuthActivity"
             android:exported="true">
 
+            <!-- NORMAL APP LAUNCH -->
+
             <intent-filter>
+
                 <action android:name="android.intent.action.MAIN" />
+
                 <category android:name="android.intent.category.LAUNCHER" />
+
+            </intent-filter>
+
+            <!-- SUPABASE EMAIL CONFIRMATION CALLBACK -->
+
+            <intent-filter>
+
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="com.pgraphics.paisystemmanager"
+                    android:host="auth"
+                    android:path="/callback" />
+
             </intent-filter>
 
         </activity>
 
+        <!-- MAIN APPLICATION -->
+
         <activity
             android:name=".MainActivity"
             android:exported="false" />
+
+        <!-- BACKGROUND VOICE RECOGNITION -->
 
         <service
             android:name=".VoiceRecognitionService"
