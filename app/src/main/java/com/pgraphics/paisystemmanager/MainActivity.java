@@ -72,10 +72,12 @@ public class MainActivity extends Activity {
     private static final int READ_TIMEOUT_MS = 45000;
     private static final int MAX_TTS_CHUNK_LENGTH = 3000;
 
-    // Conversation history is stored privately on this device only.
     private static final String HISTORY_PREFS = "pai_conversation_history";
     private static final String HISTORY_KEY = "messages";
     private static final int MAX_SAVED_MESSAGES = 500;
+    private static final int MAX_CONTEXT_HISTORY_MESSAGES = 20;
+    private static final int MAX_CONTEXT_ITEM_LENGTH = 4000;
+    private static final int MAX_CONTEXT_TOTAL_LENGTH = 16000;
 
     private static final int BACKGROUND_COLOR =
             Color.rgb(15, 15, 20);
@@ -253,6 +255,7 @@ public class MainActivity extends Activity {
         messageInput.setHintTextColor(Color.GRAY);
         messageInput.setTextSize(16);
         messageInput.setSingleLine(false);
+
         messageInput.setMinLines(2);
         messageInput.setMaxLines(5);
         messageInput.setGravity(Gravity.TOP | Gravity.START);
@@ -303,7 +306,8 @@ public class MainActivity extends Activity {
 
         params.setMargins(0, dp(4), 0, dp(4));
         button.setLayoutParams(params);
-                return button;
+
+        return button;
     }
 
     // ---------------------------------------------------------------------
@@ -311,7 +315,8 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------------
 
     /**
-     * Adds a new message, saves it locally, and renders it in the chat.
+     * Adds a message to the conversation.
+     * Only messages from P AI receive an individual read-aloud button.
      */
     private void addChatMessage(String sender, String message) {
         if (isActivityDestroyed || chatContainer == null) {
@@ -320,12 +325,11 @@ public class MainActivity extends Activity {
 
         String safeSender = sender == null ? "System" : sender;
         String safeMessage = message == null ? "" : message;
-
         persistChatMessage(safeSender, safeMessage);
         renderChatMessage(safeSender, safeMessage);
     }
 
-    /** Renders a message without saving it again. */
+    /** Renders a saved or newly-created message without saving it twice. */
     private void renderChatMessage(String sender, String message) {
         if (isActivityDestroyed || chatContainer == null) {
             return;
@@ -404,6 +408,7 @@ public class MainActivity extends Activity {
                     );
 
             readParams.topMargin = dp(5);
+
             messageCard.addView(readButton, readParams);
 
             readButton.setOnClickListener(
@@ -418,6 +423,7 @@ public class MainActivity extends Activity {
                 );
 
         cardParams.setMargins(0, dp(5), 0, dp(5));
+
         chatContainer.addView(messageCard, cardParams);
 
         chatScroll.post(() ->
@@ -426,20 +432,17 @@ public class MainActivity extends Activity {
     }
 
     // ---------------------------------------------------------------------
-    // Private local conversation history
+    // Local conversation history
     // ---------------------------------------------------------------------
 
     private void loadConversationHistory() {
         String savedJson = historyPreferences.getString(HISTORY_KEY, "[]");
-
         try {
             conversationHistory = new JSONArray(savedJson);
         } catch (JSONException e) {
-            // Recover safely if the saved history is damaged.
+            // Recover safely if the stored history is damaged.
             conversationHistory = new JSONArray();
-            historyPreferences.edit()
-                    .putString(HISTORY_KEY, "[]")
-                    .apply();
+            historyPreferences.edit().putString(HISTORY_KEY, "[]").apply();
         }
     }
 
@@ -454,7 +457,6 @@ public class MainActivity extends Activity {
 
         for (int i = 0; i < conversationHistory.length(); i++) {
             JSONObject item = conversationHistory.optJSONObject(i);
-
             if (item == null) {
                 continue;
             }
@@ -477,7 +479,7 @@ public class MainActivity extends Activity {
             item.put("timestamp", System.currentTimeMillis());
             conversationHistory.put(item);
 
-            // Keep the newest 500 messages to limit private storage use.
+            // Bound storage growth while preserving the newest conversation.
             while (conversationHistory.length() > MAX_SAVED_MESSAGES) {
                 conversationHistory.remove(0);
             }
@@ -485,10 +487,98 @@ public class MainActivity extends Activity {
             historyPreferences.edit()
                     .putString(HISTORY_KEY, conversationHistory.toString())
                     .apply();
-
         } catch (JSONException e) {
             showMessage("P AI could not save this message to local history.");
         }
+    }
+
+    /**
+     * Creates a bounded, chronological snapshot of earlier chat messages.
+     * The current question is deliberately excluded because the API adds it
+     * as the final user message itself.
+     */
+    private JSONArray buildContextHistory(String currentQuestion) {
+        JSONArray result = new JSONArray();
+        List<JSONObject> eligibleMessages = new ArrayList<>();
+
+        if (conversationHistory == null) {
+            return result;
+        }
+
+        for (int i = 0; i < conversationHistory.length(); i++) {
+            JSONObject saved = conversationHistory.optJSONObject(i);
+            if (saved == null) {
+                continue;
+            }
+
+            String sender = saved.optString("sender", "");
+            String content = saved.optString("message", "").trim();
+
+            if (content.isEmpty()) {
+                continue;
+            }
+
+            String role;
+            if ("You".equalsIgnoreCase(sender)) {
+                role = "user";
+            } else if ("P AI".equalsIgnoreCase(sender)) {
+                role = "assistant";
+            } else {
+                // System notices and errors are not conversational context.
+                continue;
+            }
+
+            if (content.length() > MAX_CONTEXT_ITEM_LENGTH) {
+                content = content.substring(
+                        content.length() - MAX_CONTEXT_ITEM_LENGTH
+                );
+            }
+
+            try {
+                JSONObject entry = new JSONObject();
+                entry.put("role", role);
+                entry.put("content", content);
+                eligibleMessages.add(entry);
+            } catch (JSONException ignored) {
+                // Skip a malformed item without interrupting the request.
+            }
+        }
+
+        // The question was just saved locally before this snapshot was made.
+        // Remove that final duplicate; the backend appends it exactly once.
+        if (!eligibleMessages.isEmpty()) {
+            JSONObject last = eligibleMessages.get(
+                    eligibleMessages.size() - 1
+            );
+            if ("user".equals(last.optString("role", ""))
+                    && currentQuestion.equals(
+                            last.optString("content", ""))) {
+                eligibleMessages.remove(eligibleMessages.size() - 1);
+            }
+        }
+
+        // Work backwards so the newest useful context always gets priority.
+        List<JSONObject> newestFirst = new ArrayList<>();
+        int totalCharacters = 0;
+        for (int i = eligibleMessages.size() - 1;
+                i >= 0
+                && newestFirst.size() < MAX_CONTEXT_HISTORY_MESSAGES;
+                i--) {
+            JSONObject entry = eligibleMessages.get(i);
+            String content = entry.optString("content", "");
+            if (totalCharacters + content.length()
+                    > MAX_CONTEXT_TOTAL_LENGTH) {
+                break;
+            }
+            newestFirst.add(entry);
+            totalCharacters += content.length();
+        }
+
+        for (int i = newestFirst.size() - 1; i >= 0; i--) {
+            result.put(newestFirst.get(i));
+        }
+
+        return result;
     }
 
     private void confirmClearHistory() {
@@ -498,14 +588,8 @@ public class MainActivity extends Activity {
                         "This will permanently delete the saved chat on this device. "
                                 + "This action cannot be undone."
                 )
-                .setNegativeButton(
-                        "CANCEL",
-                        (dialog, which) -> dialog.dismiss()
-                )
-                .setPositiveButton(
-                        "CLEAR",
-                        (dialog, which) -> clearConversationHistory()
-                )
+                .setNegativeButton("CANCEL", (dialog, which) -> dialog.dismiss())
+                .setPositiveButton("CLEAR", (dialog, which) -> clearConversationHistory())
                 .show();
     }
 
@@ -519,13 +603,6 @@ public class MainActivity extends Activity {
 
         stopCurrentSpeech();
         updateStatus("Conversation history cleared");
-
-        // This confirmation is shown but is not saved as a chat message.
-        renderChatMessage(
-                "P AI",
-                "Your conversation history has been cleared. Start a new conversation."
-        );
-
         showMessage("Your conversation history has been cleared.");
     }
 
@@ -607,8 +684,7 @@ public class MainActivity extends Activity {
 
                     textToSpeech.setOnUtteranceProgressListener(
                             new UtteranceProgressListener() {
-
-                                                        @Override
+                                @Override
                                 public void onStart(String utteranceId) {
                                     // Playback state is reflected by the button.
                                 }
@@ -620,7 +696,7 @@ public class MainActivity extends Activity {
 
                                 @Override
                                 public void onError(String utteranceId) {
-                                    handleSpeechError(utteranceId);
+                                    finishSpeechIfCurrent(utteranceId);
                                 }
 
                                 @Override
@@ -628,7 +704,7 @@ public class MainActivity extends Activity {
                                         String utteranceId,
                                         int errorCode
                                 ) {
-                                    handleSpeechError(utteranceId);
+                                    finishSpeechIfCurrent(utteranceId);
                                 }
                             }
                     );
@@ -695,6 +771,7 @@ public class MainActivity extends Activity {
                     chunks.get(i),
                     queueMode,
                     null,
+
                     utteranceId
             );
 
@@ -745,30 +822,6 @@ public class MainActivity extends Activity {
         }
 
         return chunks;
-    }
-
-    /**
-     * Stops the entire current response if any queued chunk fails. The
-     * request-id check prevents a delayed callback from an older response
-     * from interrupting a newer response.
-     */
-    private void handleSpeechError(String utteranceId) {
-        runOnUiThread(() -> {
-            if (isActivityDestroyed
-                    || activeSpeechRequestId == null
-                    || utteranceId == null) {
-                return;
-            }
-
-            String currentRequestPrefix = activeSpeechRequestId + "_part_";
-
-            if (utteranceId.startsWith(currentRequestPrefix)) {
-                stopCurrentSpeech();
-                showMessage(
-                        "P AI could not finish reading this response."
-                );
-            }
-        });
     }
 
     private void finishSpeechIfCurrent(String utteranceId) {
@@ -928,8 +981,7 @@ public class MainActivity extends Activity {
 
     private void sendMessage() {
         if (isActivityDestroyed) {
-
-                    return;
+            return;
         }
 
         if (requestInProgress) {
@@ -964,8 +1016,15 @@ public class MainActivity extends Activity {
         sendButton.setText("PLEASE WAIT...");
         updateStatus("P AI is thinking...");
 
+        // Capture history on the UI thread so the request receives a stable
+        // snapshot while the background network operation is running.
+        JSONArray contextHistory = buildContextHistory(question);
+        String contextHistoryJson = contextHistory.toString();
+
         try {
-            aiExecutor.execute(() -> performAIRequest(question));
+            aiExecutor.execute(
+                    () -> performAIRequest(question, contextHistoryJson)
+            );
         } catch (Exception e) {
             requestInProgress = false;
             restoreSendButton();
@@ -979,7 +1038,10 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void performAIRequest(String question) {
+    private void performAIRequest(
+            String question,
+            String contextHistoryJson
+    ) {
         HttpURLConnection connection = null;
 
         try {
@@ -1004,6 +1066,268 @@ public class MainActivity extends Activity {
 
             JSONObject requestBody = new JSONObject();
             requestBody.put("message", question);
+            requestBody.put(
+                    "history",
+                    new JSONArray(contextHistoryJson)
+            );
+
+            byte[] requestBytes = requestBody.toString().getBytes(
+                    StandardCharsets.UTF_8
+            );
+
+            connection.setFixedLengthStreamingMode(requestBytes.length);
+
+            try (OutputStream outputStream = connection.getOutputStream()) {
+                outputStream.write(requestBytes);
+                outputStream.flush();
+            }
+
+            int responseCode = connection.getResponseCode();
+
+            InputStream responseStream =
+                    responseCode >= 200 && responseCode < 300
+                            ? connection.getInputStream()
+                            : connection.getErrorStream();
+
+            if (responseStream == null) {
+                throw new Exception(
+                        "The server did not return a response. Please try again."
+                );
+            }
+
+            String responseText = readResponse(responseStream);
+
+            JSONObject responseJson = new JSONObject(responseText);
+
+            if (responseCode < 200 || responseCode >= 300) {
+                String serverError = responseJson.optString(
+                        "error",
+                        "The AI service could not process your request."
+                );
+
+                throw new Exception(
+                        "Server error (" + responseCode + "): " + serverError
+                );
+            }
+
+            boolean success = responseJson.optBoolean("success", false);
+            String reply = responseJson.optString("reply", "").trim();
+
+            if (!success || reply.isEmpty()) {
+                String serverError = responseJson.optString(
+                        "error",
+                        "The AI returned an empty or invalid response."
+                );
+
+                throw new Exception(serverError);
+            }
+
+            runOnUiThread(() -> {
+                if (isActivityDestroyed) {
+                    return;
+                }
+
+                addChatMessage("P AI", reply);
+                updateStatus("Ready");
+                requestInProgress = false;
+                restoreSendButton();
+
+                // Deliberately do not speak automatically.
+                // The user must tap the speaker button on this response.
+            });
+
+        } catch (Exception e) {
+            String errorMessage = e.getMessage();
+
+            if (errorMessage == null || errorMessage.trim().isEmpty()) {
+                errorMessage =
+                        "An unexpected connection error occurred.";
+            }
+
+            final String displayError = errorMessage;
+
+            runOnUiThread(() -> {
+                if (isActivityDestroyed) {
+                    return;
+                }
+
+                addChatMessage(
+                        "System",
+                        "I couldn't get a response: " + displayError
+                );
+
+                updateStatus("Connection failed");
+                requestInProgress = false;
+                restoreSendButton();
+            });
+
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private String readResponse(InputStream inputStream) throws Exception {
+        StringBuilder responseBuilder = new StringBuilder();
+
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(
+                        inputStream,
+                        StandardCharsets.UTF_8
+                )
+        )) {
+            String line;
+
+            while ((line = reader.readLine()) != null) {
+                // Preserve line boundaries in the JSON response body.
+                responseBuilder.append(line).append('\n');
+            }
+        }
+
+        return responseBuilder.toString();
+    }
+
+    private void restoreSendButton() {
+        if (sendButton != null && !isActivityDestroyed) {
+            sendButton.setEnabled(true);
+            sendButton.setText("SEND MESSAGE");
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Installed application launching
+    // ---------------------------------------------------------------------
+
+    private void openInstalledApplication(String appName) {
+        if (appName == null || appName.trim().isEmpty()) {
+            addChatMessage(
+                    "P AI",
+                    "Please specify the application you want to open."
+            );
+            return;
+        }
+
+        String requestedName = appName.trim();
+
+        try {
+            Intent launcherQuery = new Intent(Intent.ACTION_MAIN);
+            launcherQuery.addCategory(Intent.CATEGORY_LAUNCHER);
+
+            List<ResolveInfo> installedApps =
+                    getPackageManager().queryIntentActivities(
+                            launcherQuery,
+                            0
+                    );
+
+            ResolveInfo exactMatch = null;
+            ResolveInfo partialMatch = null;
+
+            for (ResolveInfo app : installedApps) {
+                if (app.activityInfo == null) {
+                    continue;
+                }
+
+                String label = app.loadLabel(
+                        getPackageManager()
+                ).toString();
+
+                if (label.equalsIgnoreCase(requestedName)) {
+                    exactMatch = app;
+                    break;
+                }
+
+                if (partialMatch == null
+                        && label.toLowerCase(Locale.ROOT)
+                        .contains(requestedName.toLowerCase(Locale.ROOT))) {
+                    partialMatch = app;
+                }
+            }
+
+            ResolveInfo selectedApp =
+                    exactMatch != null ? exactMatch : partialMatch;
+
+            if (selectedApp == null) {
+                addChatMessage(
+                        "P AI",
+                        "I couldn't find an installed application named "
+                                + requestedName + "."
+                );
+                return;
+            }
+
+            String packageName =
+                    selectedApp.activityInfo.packageName;
+
+            Intent launchIntent =
+                    getPackageManager().getLaunchIntentForPackage(packageName);
+
+            if (launchIntent == null) {
+                addChatMessage(
+                        "P AI",
+                        "I found " + selectedApp.loadLabel(getPackageManager())
+                                + ", but Android did not provide a launch action."
+                );
+                return;
+            }
+
+            addChatMessage(
+                    "P AI",
+                    "Opening " + selectedApp.loadLabel(getPackageManager()) + "..."
+            );
+
+            startActivity(launchIntent);
+
+        } catch (Exception e) {
+            addChatMessage(
+                    "P AI",
+                    "I couldn't open that application. Please try again."
+            );
+        }
+    }
+}
+
+            addChatMessage(
+                    "System",
+                    "P AI could not start the request. Please try again."
+            );
+
+            updateStatus("Unable to start AI request.");
+        }
+    }
+
+    private void performAIRequest(
+            String question,
+            String contextHistoryJson
+    ) {
+        HttpURLConnection connection = null;
+
+        try {
+            URL url = new URL(API_URL);
+            connection = (HttpURLConnection) url.openConnection();
+
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            connection.setReadTimeout(READ_TIMEOUT_MS);
+            connection.setDoOutput(true);
+            connection.setUseCaches(false);
+
+            connection.setRequestProperty(
+                    "Content-Type",
+                    "application/json; charset=UTF-8"
+            );
+
+            connection.setRequestProperty(
+                    "Accept",
+                    "application/json"
+            );
+
+            JSONObject requestBody = new JSONObject();
+            requestBody.put("message", question);
+            requestBody.put(
+                    "history",
+                    new JSONArray(contextHistoryJson)
+            );
 
             byte[] requestBytes = requestBody.toString().getBytes(
                     StandardCharsets.UTF_8
