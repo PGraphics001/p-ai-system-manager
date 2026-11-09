@@ -1163,6 +1163,79 @@ public class MainActivity extends Activity {
     // AI chat request handling
     // ---------------------------------------------------------------------
 
+    /**
+     * Builds the recent context for the backend from the currently active chat.
+     * The current question is already sent separately as the final user turn,
+     * so it is excluded here to prevent duplicate prompts.
+     */
+    private JSONArray buildContextHistory(String currentQuestion) {
+        JSONArray result = new JSONArray();
+        if (conversationHistory == null || conversationHistory.length() == 0) {
+            return result;
+        }
+
+        ArrayList<JSONObject> eligibleMessages = new ArrayList<>();
+        boolean skippedCurrentQuestion = false;
+        int totalCharacters = 0;
+
+        // Walk backwards so the newest messages are retained within the limits.
+        for (int i = conversationHistory.length() - 1; i >= 0; i--) {
+            JSONObject saved = conversationHistory.optJSONObject(i);
+            if (saved == null) continue;
+
+            String sender = saved.optString("sender", "").trim();
+            String content = saved.optString("message", "").trim();
+            if (content.isEmpty()) continue;
+
+            String role;
+            if ("You".equalsIgnoreCase(sender)) {
+                role = "user";
+            } else if ("P AI".equalsIgnoreCase(sender)) {
+                role = "assistant";
+            } else {
+                // Do not send system notices or local command feedback as context.
+                continue;
+            }
+
+            if (!skippedCurrentQuestion
+                    && "user".equals(role)
+                    && content.equals(currentQuestion == null ? "" : currentQuestion.trim())) {
+                skippedCurrentQuestion = true;
+                continue;
+            }
+
+            if (content.length() > MAX_CONTEXT_ITEM_LENGTH) {
+                content = content.substring(content.length() - MAX_CONTEXT_ITEM_LENGTH);
+            }
+            if (totalCharacters + content.length() > MAX_CONTEXT_TOTAL_LENGTH) {
+                int remaining = MAX_CONTEXT_TOTAL_LENGTH - totalCharacters;
+                if (remaining <= 0) break;
+                content = content.substring(content.length() - remaining);
+            }
+
+            try {
+                JSONObject contextItem = new JSONObject();
+                contextItem.put("role", role);
+                contextItem.put("content", content);
+                eligibleMessages.add(contextItem);
+                totalCharacters += content.length();
+            } catch (JSONException ignored) {
+                // Skip a malformed item without interrupting the chat request.
+            }
+
+            if (eligibleMessages.size() >= MAX_CONTEXT_HISTORY_MESSAGES
+                    || totalCharacters >= MAX_CONTEXT_TOTAL_LENGTH) {
+                break;
+            }
+        }
+
+        // Reverse the backward collection to restore normal conversation order.
+        for (int i = eligibleMessages.size() - 1; i >= 0; i--) {
+            result.put(eligibleMessages.get(i));
+        }
+        return result;
+    }
+
     private void sendMessage() {
         if (isActivityDestroyed) {
             return;
