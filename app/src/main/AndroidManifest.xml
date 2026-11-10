@@ -1,3 +1,4 @@
+
 <?xml version="1.0" encoding="utf-8"?>
 
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -13,7 +14,6 @@
 
     <!-- BACKGROUND SERVICE -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <!-- NOTIFICATIONS -->
@@ -40,63 +40,51 @@
     </queries>
 
     <application
-android:icon="@drawable/p_ai_launcher"
-android:roundIcon="@drawable/p_ai_launcher"
         android:name=".PAIApplication"
-
+        android:icon="@drawable/p_ai_launcher"
+        android:roundIcon="@drawable/p_ai_launcher"
         android:allowBackup="false"
-
         android:label="P AI System Manager"
-
         android:theme="@android:style/Theme.Material.NoActionBar"
-
         android:supportsRtl="true"
-
         android:usesCleartextTraffic="false">
 
         <!-- AUTHENTICATION ACTIVITY -->
-
         <activity
             android:name=".AuthActivity"
             android:exported="true">
 
             <!-- NORMAL APP LAUNCH -->
-
             <intent-filter>
-
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
-
             </intent-filter>
 
             <!-- SUPABASE EMAIL CONFIRMATION CALLBACK -->
-
             <intent-filter>
-
                 <action android:name="android.intent.action.VIEW" />
-
                 <category android:name="android.intent.category.DEFAULT" />
-
                 <category android:name="android.intent.category.BROWSABLE" />
 
                 <data
                     android:scheme="com.pgraphics.paisystemmanager"
                     android:host="auth"
                     android:path="/callback" />
-
             </intent-filter>
 
         </activity>
 
-        <!-- MAIN APPLICATION -->
-
+        <!-- MAIN DASHBOARD -->
         <activity
             android:name=".MainActivity"
             android:exported="false" />
 
-        <!-- BACKGROUND VOICE RECOGNITION -->
+        <!-- DEDICATED AI CHAT SCREEN -->
+        <activity
+            android:name=".ChatActivity"
+            android:exported="false" />
 
+        <!-- BACKGROUND VOICE RECOGNITION -->
         <service
             android:name=".VoiceRecognitionService"
             android:enabled="true"
