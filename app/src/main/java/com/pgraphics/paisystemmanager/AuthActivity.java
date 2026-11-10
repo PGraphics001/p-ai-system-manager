@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.net.Uri;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -33,7 +34,9 @@ public class AuthActivity extends Activity {
     private static final int WHITE = Color.WHITE;
     private static final int MUTED = Color.rgb(155, 170, 195);
 
-    private static final long NO_SESSION_SPLASH_DELAY_MS = 550L;
+    private static final long STARTUP_ANIMATION_DURATION_MS = 2200L;
+    private static final long NO_SESSION_SPLASH_DELAY_MS =
+            STARTUP_ANIMATION_DURATION_MS;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -59,6 +62,13 @@ public class AuthActivity extends Activity {
     private boolean navigationStarted = false;
     private boolean authInterfaceBuilt = false;
     private boolean startupScreenVisible = false;
+    private boolean navigationScheduled = false;
+    private long startupStartedAt = 0L;
+
+    private final Runnable completeStartupNavigation = () -> {
+        navigationScheduled = false;
+        openMainActivityNow();
+    };
 
     private AuthSessionManager sessionManager;
 
@@ -102,6 +112,7 @@ public class AuthActivity extends Activity {
     @Override
     protected void onDestroy() {
         mainHandler.removeCallbacks(revealAuthAfterDelay);
+        mainHandler.removeCallbacks(completeStartupNavigation);
         super.onDestroy();
     }
 
@@ -111,41 +122,23 @@ public class AuthActivity extends Activity {
 
     private void showStartupScreen() {
         startupScreenVisible = true;
+        startupStartedAt = SystemClock.uptimeMillis();
+        navigationScheduled = false;
+        mainHandler.removeCallbacks(completeStartupNavigation);
 
         LinearLayout splash = new LinearLayout(this);
         splash.setOrientation(LinearLayout.VERTICAL);
         splash.setGravity(Gravity.CENTER);
-        splash.setPadding(dp(28), dp(30), dp(28), dp(30));
+        splash.setPadding(dp(24), dp(24), dp(24), dp(24));
         splash.setBackgroundColor(BACKGROUND);
 
-        // Use the existing official launcher artwork. This is not a recreated
-        // text logo; the drawable must remain the approved P AI artwork with ™.
-        ImageView logo = new ImageView(this);
-        logo.setImageResource(R.drawable.p_ai_launcher);
-        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        logo.setAlpha(0.25f);
-        logo.setScaleX(0.94f);
-        logo.setScaleY(0.94f);
-
+        // This custom view reveals the approved PNG in stages. It does not
+        // redraw, recolour, crop permanently, or remove the official TM mark.
+        StartupLogoView logo = new StartupLogoView(this);
         LinearLayout.LayoutParams logoParams =
-                new LinearLayout.LayoutParams(dp(190), dp(190));
+                new LinearLayout.LayoutParams(dp(260), dp(260));
         logoParams.gravity = Gravity.CENTER;
         splash.addView(logo, logoParams);
-
-        TextView brand = new TextView(this);
-        brand.setText("P AI SYSTEM MANAGER");
-        brand.setTextColor(WHITE);
-        brand.setTextSize(20);
-        brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        brand.setGravity(Gravity.CENTER);
-        brand.setLetterSpacing(0.06f);
-
-        LinearLayout.LayoutParams brandParams =
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT);
-        brandParams.topMargin = dp(16);
-        splash.addView(brand, brandParams);
 
         TextView tagline = new TextView(this);
         tagline.setText("Your intelligent personal assistant");
@@ -157,7 +150,7 @@ public class AuthActivity extends Activity {
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT);
-        taglineParams.topMargin = dp(7);
+        taglineParams.topMargin = dp(15);
         splash.addView(tagline, taglineParams);
 
         ProgressBar progress = new ProgressBar(this);
@@ -166,9 +159,9 @@ public class AuthActivity extends Activity {
                 android.content.res.ColorStateList.valueOf(CYAN));
 
         LinearLayout.LayoutParams progressParams =
-                new LinearLayout.LayoutParams(dp(34), dp(34));
+                new LinearLayout.LayoutParams(dp(30), dp(30));
         progressParams.gravity = Gravity.CENTER;
-        progressParams.topMargin = dp(30);
+        progressParams.topMargin = dp(24);
         splash.addView(progress, progressParams);
 
         startupStatus = new TextView(this);
@@ -181,16 +174,14 @@ public class AuthActivity extends Activity {
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT);
-        statusParams.topMargin = dp(13);
+        statusParams.topMargin = dp(12);
         splash.addView(startupStatus, statusParams);
 
         setContentView(splash);
-
-        logo.animate()
+        splash.setAlpha(0f);
+        splash.animate()
                 .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
-                .setDuration(700)
+                .setDuration(260L)
                 .setInterpolator(new DecelerateInterpolator())
                 .start();
     }
@@ -738,8 +729,30 @@ public class AuthActivity extends Activity {
     private void openMainActivity() {
         if (isFinishing() || isDestroyed() || navigationStarted) return;
 
+        // If session restoration finishes quickly, let the full brand animation
+        // complete before opening the dashboard.
+        if (startupScreenVisible) {
+            long elapsed = SystemClock.uptimeMillis() - startupStartedAt;
+            long remaining = STARTUP_ANIMATION_DURATION_MS - elapsed;
+            if (remaining > 0L) {
+                if (!navigationScheduled) {
+                    navigationScheduled = true;
+                    mainHandler.postDelayed(completeStartupNavigation, remaining);
+                }
+                return;
+            }
+        }
+
+        openMainActivityNow();
+    }
+
+    private void openMainActivityNow() {
+        if (isFinishing() || isDestroyed() || navigationStarted) return;
+
         navigationStarted = true;
+        startupScreenVisible = false;
         mainHandler.removeCallbacks(revealAuthAfterDelay);
+        mainHandler.removeCallbacks(completeStartupNavigation);
 
         Intent intent = new Intent(AuthActivity.this, MainActivity.class);
         intent.setFlags(
