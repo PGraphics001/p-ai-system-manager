@@ -4,18 +4,24 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.ClipboardManager;
+import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
@@ -84,10 +90,16 @@ public class MainActivity extends Activity {
     private static final int MAX_CONTEXT_TOTAL_LENGTH = 16000;
 
     private static final int BACKGROUND_COLOR =
-            Color.rgb(15, 15, 20);
+            Color.rgb(8, 14, 27);
 
     private static final int ACCENT_COLOR =
-            Color.rgb(230, 180, 70);
+            Color.rgb(45, 174, 255);
+
+    private static final int PANEL_COLOR =
+            Color.rgb(18, 29, 48);
+
+    private static final int USER_BUBBLE_COLOR =
+            Color.rgb(22, 62, 96);
 
     // ---------------------------------------------------------------------
     // User interface
@@ -181,164 +193,152 @@ public class MainActivity extends Activity {
     private void buildInterface() {
         rootLayout = new LinearLayout(this);
         rootLayout.setOrientation(LinearLayout.VERTICAL);
-        rootLayout.setPadding(
-                dp(16),
-                dp(12),
-                dp(16),
-                dp(10)
-        );
+        rootLayout.setPadding(dp(12), dp(8), dp(12), dp(8));
         rootLayout.setBackgroundColor(BACKGROUND_COLOR);
 
-        TextView title = new TextView(this);
-        title.setText("P AI SYSTEM MANAGER");
-        title.setTextSize(22);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        title.setTextColor(ACCENT_COLOR);
-        title.setGravity(Gravity.CENTER);
-        title.setPadding(0, dp(8), 0, dp(8));
+        // Compact ChatGPT-style header: history on the left, brand in the
+        // centre, and the new-chat compose icon on the right.
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
 
-        rootLayout.addView(
-                title,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-        );
+        chatHistoryButton = createIconButton("☰", "Open chat history");
+        newChatButton = createIconButton("✎", "Start a new chat");
+
+        TextView title = new TextView(this);
+        title.setText("P AI");
+        title.setTextSize(21);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setTextColor(Color.WHITE);
+        title.setGravity(Gravity.CENTER);
+
+        header.addView(chatHistoryButton, new LinearLayout.LayoutParams(dp(46), dp(44)));
+        header.addView(title, new LinearLayout.LayoutParams(0, dp(44), 1));
+        header.addView(newChatButton, new LinearLayout.LayoutParams(dp(46), dp(44)));
+        rootLayout.addView(header);
 
         statusText = new TextView(this);
         statusText.setText("Starting P AI...");
-        statusText.setTextSize(13);
-        statusText.setTextColor(Color.LTGRAY);
+        statusText.setTextSize(12);
+        statusText.setTextColor(Color.rgb(145, 165, 190));
         statusText.setGravity(Gravity.CENTER);
-        statusText.setPadding(0, dp(3), 0, dp(10));
+        statusText.setPadding(0, dp(1), 0, dp(7));
+        rootLayout.addView(statusText, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        rootLayout.addView(
-                statusText,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-        );
-
-        LinearLayout conversationToolbar = new LinearLayout(this);
-        conversationToolbar.setOrientation(LinearLayout.HORIZONTAL);
-
-        newChatButton = createButton("+ NEW CHAT");
-        chatHistoryButton = createButton("CHAT HISTORY");
-        newChatButton.setTextSize(11);
-        chatHistoryButton.setTextSize(11);
-        newChatButton.setTextColor(Color.WHITE);
-        chatHistoryButton.setTextColor(Color.WHITE);
-        newChatButton.setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(Color.rgb(65, 65, 75))
-        );
-        chatHistoryButton.setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(Color.rgb(65, 65, 75))
-        );
-
-        LinearLayout.LayoutParams newChatParams =
-                new LinearLayout.LayoutParams(0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        newChatParams.setMargins(dp(3), dp(2), dp(3), dp(5));
-        LinearLayout.LayoutParams historyParams =
-                new LinearLayout.LayoutParams(0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        historyParams.setMargins(dp(3), dp(2), dp(3), dp(5));
-        conversationToolbar.addView(newChatButton, newChatParams);
-        conversationToolbar.addView(chatHistoryButton, historyParams);
-        rootLayout.addView(conversationToolbar);
-
-        newChatButton.setOnClickListener(v -> createNewConversation());
         chatHistoryButton.setOnClickListener(v -> showConversationHistory());
+        newChatButton.setOnClickListener(v -> createNewConversation());
 
         chatScroll = new ScrollView(this);
         chatScroll.setFillViewport(true);
         chatScroll.setSmoothScrollingEnabled(true);
+        chatScroll.setClipToPadding(false);
 
         chatContainer = new LinearLayout(this);
         chatContainer.setOrientation(LinearLayout.VERTICAL);
-        chatContainer.setPadding(
-                dp(3),
-                dp(4),
-                dp(3),
-                dp(8)
-        );
+        chatContainer.setPadding(dp(2), dp(6), dp(2), dp(10));
+        chatScroll.addView(chatContainer, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT,
+                ScrollView.LayoutParams.WRAP_CONTENT));
 
-        chatScroll.addView(
-                chatContainer,
-                new ScrollView.LayoutParams(
-                        ScrollView.LayoutParams.MATCH_PARENT,
-                        ScrollView.LayoutParams.WRAP_CONTENT
-                )
-        );
+        rootLayout.addView(chatScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
 
-        rootLayout.addView(
-                chatScroll,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        0,
-                        1
-                )
-        );
+        // Rounded composer shell with expanding text field and icon-only
+        // microphone/send controls, similar to the ChatGPT mobile composer.
+        LinearLayout composer = new LinearLayout(this);
+        composer.setOrientation(LinearLayout.HORIZONTAL);
+        composer.setGravity(Gravity.CENTER_VERTICAL);
+        composer.setPadding(dp(7), dp(4), dp(6), dp(4));
+        composer.setBackground(createRoundedBackground(PANEL_COLOR, dp(28),
+                Color.rgb(54, 76, 105), dp(1)));
 
         messageInput = new EditText(this);
-        messageInput.setHint("Ask P AI anything...");
+        messageInput.setHint("Message P AI");
         messageInput.setTextColor(Color.WHITE);
-        messageInput.setHintTextColor(Color.GRAY);
+        messageInput.setHintTextColor(Color.rgb(145, 160, 180));
         messageInput.setTextSize(16);
         messageInput.setSingleLine(false);
-        messageInput.setMinLines(2);
+        messageInput.setMinLines(1);
         messageInput.setMaxLines(5);
-        messageInput.setGravity(Gravity.TOP | Gravity.START);
-        messageInput.setPadding(
-                dp(12),
-                dp(10),
-                dp(12),
-                dp(10)
-        );
+        messageInput.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        messageInput.setPadding(dp(10), dp(8), dp(6), dp(8));
+        messageInput.setBackgroundColor(Color.TRANSPARENT);
+        messageInput.setHintTextColor(Color.rgb(145, 160, 180));
+        composer.addView(messageInput, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
-        rootLayout.addView(
-                messageInput,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-        );
+        voiceButton = createComposerIconButton("🎤", "Voice input");
+        sendButton = createComposerIconButton("↑", "Send message");
+        sendButton.setVisibility(View.GONE);
+        composer.addView(voiceButton, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        composer.addView(sendButton, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        rootLayout.addView(composer, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        sendButton = createButton("SEND MESSAGE");
-        voiceButton = createButton("VOICE INPUT");
-
-        rootLayout.addView(sendButton);
-        rootLayout.addView(voiceButton);
-
-        sendButton.setOnClickListener(v -> sendMessage());
         voiceButton.setOnClickListener(v -> startManualVoiceRecognition());
+        sendButton.setOnClickListener(v -> sendMessage());
+        messageInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                updateComposerButtons();
+            }
+            @Override public void afterTextChanged(Editable editable) { }
+        });
 
         setContentView(rootLayout);
-
         restoreConversationHistory();
+        updateComposerButtons();
     }
 
-    private Button createButton(String label) {
+    private Button createIconButton(String icon, String description) {
         Button button = new Button(this);
-        button.setText(label);
-        button.setTextColor(Color.BLACK);
-        button.setTextSize(13);
+        button.setText(icon);
+        button.setTextSize(22);
+        button.setTextColor(Color.WHITE);
         button.setAllCaps(false);
-        button.setBackgroundTintList(
-                android.content.res.ColorStateList.valueOf(ACCENT_COLOR)
-        );
-
-        LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                );
-
-        params.setMargins(0, dp(4), 0, dp(4));
-        button.setLayoutParams(params);
-
+        button.setContentDescription(description);
+        button.setMinWidth(0);
+        button.setMinHeight(0);
+        button.setPadding(0, 0, 0, 0);
+        button.setBackground(createRoundedBackground(PANEL_COLOR, dp(15),
+                Color.rgb(42, 65, 94), dp(1)));
         return button;
+    }
+
+    private Button createComposerIconButton(String icon, String description) {
+        Button button = new Button(this);
+        button.setText(icon);
+        button.setTextSize("↑".equals(icon) ? 25 : 20);
+        button.setTextColor(Color.WHITE);
+        button.setAllCaps(false);
+        button.setContentDescription(description);
+        button.setMinWidth(0);
+        button.setMinHeight(0);
+        button.setPadding(0, 0, 0, 0);
+        int color = "↑".equals(icon) ? ACCENT_COLOR : Color.rgb(39, 54, 75);
+        button.setBackground(createRoundedBackground(color, dp(22), color, 0));
+        return button;
+    }
+
+    private GradientDrawable createRoundedBackground(int color, int radius,
+                                                       int strokeColor, int strokeWidth) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(radius);
+        if (strokeWidth > 0) drawable.setStroke(strokeWidth, strokeColor);
+        return drawable;
+    }
+
+    private void updateComposerButtons() {
+        if (messageInput == null || sendButton == null || voiceButton == null) return;
+        boolean hasText = !messageInput.getText().toString().trim().isEmpty();
+        voiceButton.setVisibility(hasText ? View.GONE : View.VISIBLE);
+        sendButton.setVisibility(hasText ? View.VISIBLE : View.GONE);
+        sendButton.setEnabled(!requestInProgress);
+        voiceButton.setEnabled(!requestInProgress);
     }
 
     // ---------------------------------------------------------------------
@@ -362,104 +362,104 @@ public class MainActivity extends Activity {
 
     /** Renders a saved or newly-created message without saving it twice. */
     private void renderChatMessage(String sender, String message) {
-        if (isActivityDestroyed || chatContainer == null) {
-            return;
-        }
+        if (isActivityDestroyed || chatContainer == null) return;
+
+        boolean isUser = "You".equalsIgnoreCase(sender);
+        boolean isAssistant = "P AI".equalsIgnoreCase(sender);
+
+        LinearLayout messageRow = new LinearLayout(this);
+        messageRow.setOrientation(LinearLayout.HORIZONTAL);
+        messageRow.setGravity(isUser ? Gravity.END : Gravity.START);
 
         LinearLayout messageCard = new LinearLayout(this);
         messageCard.setOrientation(LinearLayout.VERTICAL);
-        messageCard.setPadding(
-                dp(12),
-                dp(9),
-                dp(12),
-                dp(8)
-        );
-
-        if ("You".equalsIgnoreCase(sender)) {
-            messageCard.setBackgroundColor(Color.rgb(42, 42, 52));
-        } else if ("P AI".equalsIgnoreCase(sender)) {
-            messageCard.setBackgroundColor(Color.rgb(31, 35, 43));
-        } else {
-            messageCard.setBackgroundColor(Color.rgb(55, 39, 39));
-        }
+        messageCard.setPadding(dp(13), dp(10), dp(13), dp(8));
+        int bubbleColor = isUser ? USER_BUBBLE_COLOR
+                : (isAssistant ? PANEL_COLOR : Color.rgb(55, 39, 45));
+        messageCard.setBackground(createRoundedBackground(bubbleColor, dp(19),
+                bubbleColor, 0));
 
         TextView senderView = new TextView(this);
-        senderView.setText(sender);
-        senderView.setTextSize(13);
+        senderView.setText(sender == null ? "System" : sender);
+        senderView.setTextSize(12);
         senderView.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        senderView.setTextColor(
-                "P AI".equalsIgnoreCase(sender)
-                        ? ACCENT_COLOR
-                        : Color.LTGRAY
-        );
-
-        messageCard.addView(
-                senderView,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-        );
+        senderView.setTextColor(isAssistant ? ACCENT_COLOR : Color.rgb(190, 205, 225));
+        messageCard.addView(senderView);
 
         TextView messageView = new TextView(this);
         messageView.setText(message == null ? "" : message);
         messageView.setTextSize(15);
         messageView.setTextColor(Color.WHITE);
         messageView.setTextIsSelectable(true);
-        messageView.setLineSpacing(dp(2), 1.0f);
-        messageView.setPadding(0, dp(5), 0, dp(3));
+        messageView.setLineSpacing(dp(3), 1.02f);
+        messageView.setPadding(0, dp(5), 0, dp(4));
+        messageView.setMaxWidth(dp(320));
+        messageCard.addView(messageView);
 
-        messageCard.addView(
-                messageView,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-        );
+        LinearLayout actionRow = new LinearLayout(this);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionRow.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
 
-        if ("P AI".equalsIgnoreCase(sender)
-                && message != null
-                && !message.trim().isEmpty()) {
+        TextView copyIcon = createMessageActionIcon("⧉", "Copy message");
+        copyIcon.setOnClickListener(v -> copyMessageToClipboard(message));
+        actionRow.addView(copyIcon, new LinearLayout.LayoutParams(dp(38), dp(34)));
 
+        if (isAssistant && message != null && !message.trim().isEmpty()) {
             Button readButton = new Button(this);
-            readButton.setText("🔊  Read aloud");
-            readButton.setTextSize(12);
+            readButton.setText("🔊");
+            readButton.setTextSize(17);
             readButton.setAllCaps(false);
-            readButton.setTextColor(ACCENT_COLOR);
-            readButton.setBackgroundTintList(
-                    android.content.res.ColorStateList.valueOf(
-                            Color.rgb(45, 45, 53)
-                    )
-            );
-
-            LinearLayout.LayoutParams readParams =
-                    new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.WRAP_CONTENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT
-                    );
-
-            readParams.topMargin = dp(5);
-
-            messageCard.addView(readButton, readParams);
-
-            readButton.setOnClickListener(
-                    v -> handleReadAloudClick(message, readButton)
-            );
+            readButton.setTextColor(Color.WHITE);
+            readButton.setContentDescription("Read this response aloud");
+            readButton.setMinWidth(0);
+            readButton.setMinHeight(0);
+            readButton.setPadding(0, 0, 0, 0);
+            readButton.setBackground(createRoundedBackground(Color.TRANSPARENT,
+                    dp(12), Color.TRANSPARENT, 0));
+            actionRow.addView(readButton, new LinearLayout.LayoutParams(dp(38), dp(34)));
+            readButton.setOnClickListener(v -> handleReadAloudClick(message, readButton));
         }
 
-        LinearLayout.LayoutParams cardParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                );
+        messageCard.addView(actionRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(34)));
 
-        cardParams.setMargins(0, dp(5), 0, dp(5));
+        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        cardParams.setMargins(dp(2), dp(5), dp(2), dp(5));
+        messageRow.addView(messageCard, cardParams);
 
-        chatContainer.addView(messageCard, cardParams);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        chatContainer.addView(messageRow, rowParams);
+        chatScroll.post(() -> chatScroll.fullScroll(ScrollView.FOCUS_DOWN));
+    }
 
-        chatScroll.post(() ->
-                chatScroll.fullScroll(ScrollView.FOCUS_DOWN)
-        );
+    private TextView createMessageActionIcon(String icon, String description) {
+        TextView view = new TextView(this);
+        view.setText(icon);
+        view.setTextSize(19);
+        view.setTextColor(Color.rgb(165, 185, 210));
+        view.setGravity(Gravity.CENTER);
+        view.setContentDescription(description);
+        view.setClickable(true);
+        view.setFocusable(true);
+        return view;
+    }
+
+    private void copyMessageToClipboard(String message) {
+        if (message == null || message.trim().isEmpty()) return;
+        try {
+            ClipboardManager clipboard = (ClipboardManager)
+                    getSystemService(Context.CLIPBOARD_SERVICE);
+            if (clipboard != null) {
+                clipboard.setPrimaryClip(ClipData.newPlainText("P AI message", message));
+                showMessage("Message copied.");
+            }
+        } catch (Exception e) {
+            showMessage("Unable to copy this message.");
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -929,7 +929,7 @@ public class MainActivity extends Activity {
 
         activeSpeechRequestId = UUID.randomUUID().toString();
         activeSpeechButton = button;
-        button.setText("■  Stop reading");
+        button.setText("■");
 
         List<String> chunks = splitTextForSpeech(
                 cleanText,
@@ -1035,7 +1035,7 @@ public class MainActivity extends Activity {
 
     private void resetSpeechButton() {
         if (activeSpeechButton != null) {
-            activeSpeechButton.setText("🔊  Read aloud");
+            activeSpeechButton.setText("🔊");
         }
 
         activeSpeechButton = null;
@@ -1270,8 +1270,9 @@ public class MainActivity extends Activity {
 
         requestInProgress = true;
         sendButton.setEnabled(false);
-        sendButton.setText("PLEASE WAIT...");
+        sendButton.setText("…");
         updateStatus("P AI is thinking...");
+        updateComposerButtons();
 
         // Capture history on the UI thread so the request receives a stable
         // snapshot while the background network operation is running.
@@ -1448,7 +1449,8 @@ public class MainActivity extends Activity {
     private void restoreSendButton() {
         if (sendButton != null && !isActivityDestroyed) {
             sendButton.setEnabled(true);
-            sendButton.setText("SEND MESSAGE");
+            sendButton.setText("↑");
+            updateComposerButtons();
         }
     }
 
