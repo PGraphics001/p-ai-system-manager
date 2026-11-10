@@ -1,1547 +1,1870 @@
 package com.pgraphics.paisystemmanager;
 
-import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.content.Context;
-import android.content.ClipboardManager;
-import android.content.ClipData;
+import android.app.ActivityManager;
 import android.content.Intent;
-import android.content.SharedPreferences;
+import android.content.Context;
 import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
-import android.speech.RecognizerIntent;
-import android.speech.SpeechRecognizer;
-import android.speech.tts.TextToSpeech;
-import android.speech.tts.UtteranceProgressListener;
-import android.text.Editable;
-import android.text.TextWatcher;
+import android.os.Build;
+import android.os.BatteryManager;
+import android.os.Environment;
+import android.os.StatFs;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
-import android.view.inputmethod.InputMethodManager;
-import android.widget.Button;
-import android.widget.EditText;
+import android.view.ViewGroup;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
+import java.text.DecimalFormat;
 
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
-/**
- * P AI SYSTEM MANAGER
- *
- * Main chat screen.
- *
- * Current responsibilities:
- * - Online AI chat through the P AI Vercel API.
- * - Manual online speech input through Android's speech interface.
- * - User-controlled text-to-speech for individual AI messages.
- * - Local launching of installed applications.
- *
- * Offline recognition and the Vosk background service are deliberately
- * not started from this screen while that feature is being stabilised.
- */
 public class MainActivity extends Activity {
 
-    // ---------------------------------------------------------------------
-    // Configuration
-    // ---------------------------------------------------------------------
+    // =========================================================
+    // BRAND COLOURS
+    // =========================================================
 
-    private static final String API_URL =
-            "https://p-ai-system-manager-api.vercel.app/api/chat";
+    private static final int BACKGROUND =
+            Color.rgb(7, 13, 29);
 
-    private static final int AUDIO_PERMISSION_REQUEST = 1001;
-    private static final int SPEECH_REQUEST = 1002;
+    private static final int PANEL =
+            Color.rgb(17, 29, 49);
 
-    private static final int CONNECT_TIMEOUT_MS = 20000;
-    private static final int READ_TIMEOUT_MS = 45000;
-    private static final int MAX_TTS_CHUNK_LENGTH = 3000;
+    private static final int PANEL_LIGHT =
+            Color.rgb(23, 39, 64);
 
-    private static final String HISTORY_PREFS = "pai_conversation_history";
-    private static final String HISTORY_KEY = "messages";
-    private static final String CONVERSATIONS_PREFS = "pai_conversations";
-    private static final String CONVERSATIONS_KEY = "sessions";
-    private static final String ACTIVE_CONVERSATION_KEY = "active_id";
-    private static final int MAX_CONVERSATIONS = 100;
-    private static final int MAX_SAVED_MESSAGES = 500;
-    private static final int MAX_CONTEXT_HISTORY_MESSAGES = 20;
-    private static final int MAX_CONTEXT_ITEM_LENGTH = 4000;
-    private static final int MAX_CONTEXT_TOTAL_LENGTH = 16000;
+    private static final int BLUE =
+            Color.rgb(35, 115, 255);
 
-    private static final int BACKGROUND_COLOR =
-            Color.rgb(8, 14, 27);
+    private static final int CYAN =
+            Color.rgb(35, 205, 255);
 
-    private static final int ACCENT_COLOR =
-            Color.rgb(45, 174, 255);
+    private static final int WHITE =
+            Color.rgb(245, 249, 255);
 
-    private static final int PANEL_COLOR =
-            Color.rgb(18, 29, 48);
+    private static final int MUTED =
+            Color.rgb(151, 169, 195);
 
-    private static final int USER_BUBBLE_COLOR =
-            Color.rgb(22, 62, 96);
+    private static final int GREEN =
+            Color.rgb(65, 215, 145);
 
-    // ---------------------------------------------------------------------
-    // User interface
-    // ---------------------------------------------------------------------
+    // =========================================================
+    // USER INTERFACE
+    // =========================================================
 
-    private LinearLayout rootLayout;
-    private LinearLayout chatContainer;
-    private ScrollView chatScroll;
-    private EditText messageInput;
-    private TextView statusText;
-    private Button sendButton;
-    private Button voiceButton;
-    private Button newChatButton;
-    private Button chatHistoryButton;
+    private FrameLayout screenRoot;
 
-    // ---------------------------------------------------------------------
-    // System components
-    // ---------------------------------------------------------------------
+    private LinearLayout mainLayout;
 
-    private TextToSpeech textToSpeech;
+    private LinearLayout contentContainer;
 
-    private final ExecutorService aiExecutor =
-            Executors.newSingleThreadExecutor();
+    private TextView storageValue;
+    private TextView ramValue;
+    private TextView batteryValue;
+    private TextView androidValue;
 
-    // ---------------------------------------------------------------------
-    // Application state
-    // ---------------------------------------------------------------------
+    private TextView statusMessage;
 
-    private volatile boolean isActivityDestroyed = false;
-    private boolean requestInProgress = false;
-    private boolean textToSpeechReady = false;
-
-    private SharedPreferences historyPreferences;
-    private SharedPreferences conversationsPreferences;
-    private JSONArray conversations;
-    private JSONArray conversationHistory;
-    private String activeConversationId;
-
-    private Button activeSpeechButton;
-    private String activeSpeechRequestId;
-    private String activeSpeechFinalUtteranceId;
-
-    // ---------------------------------------------------------------------
-    // Activity lifecycle
-    // ---------------------------------------------------------------------
+    // =========================================================
+    // ACTIVITY LIFECYCLE
+    // =========================================================
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        historyPreferences = getSharedPreferences(
-                HISTORY_PREFS,
-                MODE_PRIVATE
-        );
-        conversationsPreferences = getSharedPreferences(
-                CONVERSATIONS_PREFS,
-                MODE_PRIVATE
-        );
-        loadConversations();
+        getWindow().setStatusBarColor(BACKGROUND);
+        getWindow().setNavigationBarColor(BACKGROUND);
 
-        buildInterface();
-        initializeTextToSpeech();
-        updateStatus("Ready");
+        getWindow().getDecorView().setSystemUiVisibility(0);
+
+        buildDashboard();
+
+        updateDeviceInformation();
     }
 
     @Override
-    protected void onDestroy() {
-        isActivityDestroyed = true;
+    protected void onResume() {
+        super.onResume();
 
-        stopCurrentSpeech();
-
-        if (textToSpeech != null) {
-            try {
-                textToSpeech.stop();
-                textToSpeech.shutdown();
-            } catch (Exception ignored) {
-                // The engine may already have been released.
-            }
-            textToSpeech = null;
-        }
-
-        aiExecutor.shutdownNow();
-
-        super.onDestroy();
+        updateDeviceInformation();
     }
 
-    // ---------------------------------------------------------------------
-    // Interface construction
-    // ---------------------------------------------------------------------
+    // =========================================================
+    // MAIN DASHBOARD CONSTRUCTION
+    // =========================================================
 
-    private void buildInterface() {
-        rootLayout = new LinearLayout(this);
-        rootLayout.setOrientation(LinearLayout.VERTICAL);
-        rootLayout.setPadding(dp(12), dp(8), dp(12), dp(8));
-        rootLayout.setBackgroundColor(BACKGROUND_COLOR);
+    private void buildDashboard() {
 
-        // Compact ChatGPT-style header: history on the left, brand in the
-        // centre, and the new-chat compose icon on the right.
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
+        screenRoot = new FrameLayout(this);
 
-        chatHistoryButton = createIconButton("☰", "Open chat history");
-        newChatButton = createIconButton("✎", "Start a new chat");
+        screenRoot.setBackgroundColor(BACKGROUND);
 
-        TextView title = new TextView(this);
-        title.setText("P AI");
-        title.setTextSize(21);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        title.setTextColor(Color.WHITE);
-        title.setGravity(Gravity.CENTER);
+        mainLayout = new LinearLayout(this);
 
-        header.addView(chatHistoryButton, new LinearLayout.LayoutParams(dp(46), dp(44)));
-        header.addView(title, new LinearLayout.LayoutParams(0, dp(44), 1));
-        header.addView(newChatButton, new LinearLayout.LayoutParams(dp(46), dp(44)));
-        rootLayout.addView(header);
+        mainLayout.setOrientation(
+                LinearLayout.VERTICAL
+        );
 
-        statusText = new TextView(this);
-        statusText.setText("Starting P AI...");
-        statusText.setTextSize(12);
-        statusText.setTextColor(Color.rgb(145, 165, 190));
-        statusText.setGravity(Gravity.CENTER);
-        statusText.setPadding(0, dp(1), 0, dp(7));
-        rootLayout.addView(statusText, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
+        mainLayout.setBackgroundColor(BACKGROUND);
 
-        chatHistoryButton.setOnClickListener(v -> showConversationHistory());
-        newChatButton.setOnClickListener(v -> createNewConversation());
+        screenRoot.addView(
+                mainLayout,
+                new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                )
+        );
 
-        chatScroll = new ScrollView(this);
-        chatScroll.setFillViewport(true);
-        chatScroll.setSmoothScrollingEnabled(true);
-        chatScroll.setClipToPadding(false);
+        // TOP NAVIGATION
+        buildTopBar();
 
-        chatContainer = new LinearLayout(this);
-        chatContainer.setOrientation(LinearLayout.VERTICAL);
-        chatContainer.setPadding(dp(2), dp(6), dp(2), dp(10));
-        chatScroll.addView(chatContainer, new ScrollView.LayoutParams(
-                ScrollView.LayoutParams.MATCH_PARENT,
-                ScrollView.LayoutParams.WRAP_CONTENT));
+        // SCROLLABLE DASHBOARD
+        ScrollView scrollView = new ScrollView(this);
 
-        rootLayout.addView(chatScroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        scrollView.setFillViewport(true);
 
-        // Rounded composer shell with expanding text field and icon-only
-        // microphone/send controls, similar to the ChatGPT mobile composer.
-        LinearLayout composer = new LinearLayout(this);
-        composer.setOrientation(LinearLayout.HORIZONTAL);
-        composer.setGravity(Gravity.CENTER_VERTICAL);
-        composer.setPadding(dp(7), dp(4), dp(6), dp(4));
-        composer.setBackground(createRoundedBackground(PANEL_COLOR, dp(28),
-                Color.rgb(54, 76, 105), dp(1)));
+        scrollView.setVerticalScrollBarEnabled(false);
 
-        messageInput = new EditText(this);
-        messageInput.setHint("Message P AI");
-        messageInput.setTextColor(Color.WHITE);
-        messageInput.setHintTextColor(Color.rgb(145, 160, 180));
-        messageInput.setTextSize(16);
-        messageInput.setSingleLine(false);
-        messageInput.setMinLines(1);
-        messageInput.setMaxLines(5);
-        messageInput.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        messageInput.setPadding(dp(10), dp(8), dp(6), dp(8));
-        messageInput.setBackgroundColor(Color.TRANSPARENT);
-        messageInput.setHintTextColor(Color.rgb(145, 160, 180));
-        composer.addView(messageInput, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        contentContainer = new LinearLayout(this);
 
-        voiceButton = createComposerIconButton("🎤", "Voice input");
-        sendButton = createComposerIconButton("↑", "Send message");
-        sendButton.setVisibility(View.GONE);
-        composer.addView(voiceButton, new LinearLayout.LayoutParams(dp(42), dp(42)));
-        composer.addView(sendButton, new LinearLayout.LayoutParams(dp(42), dp(42)));
-        rootLayout.addView(composer, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
+        contentContainer.setOrientation(
+                LinearLayout.VERTICAL
+        );
 
-        voiceButton.setOnClickListener(v -> startManualVoiceRecognition());
-        sendButton.setOnClickListener(v -> sendMessage());
-        messageInput.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                updateComposerButtons();
-            }
-            @Override public void afterTextChanged(Editable editable) { }
-        });
+        contentContainer.setPadding(
+                dp(18),
+                dp(15),
+                dp(18),
+                dp(20)
+        );
 
-        setContentView(rootLayout);
-        restoreConversationHistory();
-        updateComposerButtons();
+        scrollView.addView(
+                contentContainer,
+                new ScrollView.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+        mainLayout.addView(
+                scrollView,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        0,
+                        1
+                )
+        );
+
+        buildWelcomeSection();
+
+        buildDeviceOverview();
+
+        buildFeatureSection();
+
+        buildRecentActivitySection();
+
+        // BOTTOM NAVIGATION
+        buildBottomNavigation();
+
+        setContentView(screenRoot);
     }
 
-    private Button createIconButton(String icon, String description) {
-        Button button = new Button(this);
-        button.setText(icon);
-        button.setTextSize(22);
-        button.setTextColor(Color.WHITE);
-        button.setAllCaps(false);
-        button.setContentDescription(description);
-        button.setMinWidth(0);
-        button.setMinHeight(0);
-        button.setPadding(0, 0, 0, 0);
-        button.setBackground(createRoundedBackground(PANEL_COLOR, dp(15),
-                Color.rgb(42, 65, 94), dp(1)));
-        return button;
-    }
+    // =========================================================
+    // TOP NAVIGATION BAR
+    // =========================================================
 
-    private Button createComposerIconButton(String icon, String description) {
-        Button button = new Button(this);
-        button.setText(icon);
-        button.setTextSize("↑".equals(icon) ? 25 : 20);
-        button.setTextColor(Color.WHITE);
-        button.setAllCaps(false);
-        button.setContentDescription(description);
-        button.setMinWidth(0);
-        button.setMinHeight(0);
-        button.setPadding(0, 0, 0, 0);
-        int color = "↑".equals(icon) ? ACCENT_COLOR : Color.rgb(39, 54, 75);
-        button.setBackground(createRoundedBackground(color, dp(22), color, 0));
-        return button;
-    }
+    private void buildTopBar() {
 
-    private GradientDrawable createRoundedBackground(int color, int radius,
-                                                       int strokeColor, int strokeWidth) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(color);
-        drawable.setCornerRadius(radius);
-        if (strokeWidth > 0) drawable.setStroke(strokeWidth, strokeColor);
-        return drawable;
-    }
+        LinearLayout topBar = new LinearLayout(this);
 
-    private void updateComposerButtons() {
-        if (messageInput == null || sendButton == null || voiceButton == null) return;
-        boolean hasText = !messageInput.getText().toString().trim().isEmpty();
-        voiceButton.setVisibility(hasText ? View.GONE : View.VISIBLE);
-        sendButton.setVisibility(hasText ? View.VISIBLE : View.GONE);
-        sendButton.setEnabled(!requestInProgress);
-        voiceButton.setEnabled(!requestInProgress);
-    }
+        topBar.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
 
-    // ---------------------------------------------------------------------
-    // Chat message rendering
-    // ---------------------------------------------------------------------
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
 
-    /**
-     * Adds a message to the conversation.
-     * Only messages from P AI receive an individual read-aloud button.
-     */
-    private void addChatMessage(String sender, String message) {
-        if (isActivityDestroyed || chatContainer == null) {
-            return;
-        }
+        topBar.setPadding(
+                dp(15),
+                dp(12),
+                dp(15),
+                dp(12)
+        );
 
-        String safeSender = sender == null ? "System" : sender;
-        String safeMessage = message == null ? "" : message;
-        persistChatMessage(safeSender, safeMessage);
-        renderChatMessage(safeSender, safeMessage);
-    }
+        topBar.setBackgroundColor(BACKGROUND);
 
-    /** Renders a saved or newly-created message without saving it twice. */
-    private void renderChatMessage(String sender, String message) {
-        if (isActivityDestroyed || chatContainer == null) return;
+        // MENU BUTTON
+        TextView menuButton = createText(
+                "☰",
+                27,
+                CYAN,
+                true
+        );
 
-        boolean isUser = "You".equalsIgnoreCase(sender);
-        boolean isAssistant = "P AI".equalsIgnoreCase(sender);
+        menuButton.setGravity(Gravity.CENTER);
 
-        LinearLayout messageRow = new LinearLayout(this);
-        messageRow.setOrientation(LinearLayout.HORIZONTAL);
-        messageRow.setGravity(isUser ? Gravity.END : Gravity.START);
+        menuButton.setContentDescription(
+                "Open navigation menu"
+        );
 
-        LinearLayout messageCard = new LinearLayout(this);
-        messageCard.setOrientation(LinearLayout.VERTICAL);
-        messageCard.setPadding(dp(13), dp(10), dp(13), dp(8));
-        int bubbleColor = isUser ? USER_BUBBLE_COLOR
-                : (isAssistant ? PANEL_COLOR : Color.rgb(55, 39, 45));
-        messageCard.setBackground(createRoundedBackground(bubbleColor, dp(19),
-                bubbleColor, 0));
+        topBar.addView(
+                menuButton,
+                new LinearLayout.LayoutParams(
+                        dp(42),
+                        dp(45)
+                )
+        );
 
-        TextView senderView = new TextView(this);
-        senderView.setText(sender == null ? "System" : sender);
-        senderView.setTextSize(12);
-        senderView.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        senderView.setTextColor(isAssistant ? ACCENT_COLOR : Color.rgb(190, 205, 225));
-        messageCard.addView(senderView);
+        menuButton.setOnClickListener(
+                v -> showNavigationDrawer()
+        );
 
-        TextView messageView = new TextView(this);
-        messageView.setText(message == null ? "" : message);
-        messageView.setTextSize(15);
-        messageView.setTextColor(Color.WHITE);
-        messageView.setTextIsSelectable(true);
-        messageView.setLineSpacing(dp(3), 1.02f);
-        messageView.setPadding(0, dp(5), 0, dp(4));
-        messageView.setMaxWidth(dp(320));
-        messageCard.addView(messageView);
+        // OFFICIAL LOGO
+        ImageView logo = new ImageView(this);
 
-        LinearLayout actionRow = new LinearLayout(this);
-        actionRow.setOrientation(LinearLayout.HORIZONTAL);
-        actionRow.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        logo.setImageResource(
+                R.drawable.p_ai_launcher
+        );
 
-        TextView copyIcon = createMessageActionIcon("⧉", "Copy message");
-        copyIcon.setOnClickListener(v -> copyMessageToClipboard(message));
-        actionRow.addView(copyIcon, new LinearLayout.LayoutParams(dp(38), dp(34)));
+        logo.setScaleType(
+                ImageView.ScaleType.FIT_CENTER
+        );
 
-        if (isAssistant && message != null && !message.trim().isEmpty()) {
-            Button readButton = new Button(this);
-            readButton.setText("🔊");
-            readButton.setTextSize(17);
-            readButton.setAllCaps(false);
-            readButton.setTextColor(Color.WHITE);
-            readButton.setContentDescription("Read this response aloud");
-            readButton.setMinWidth(0);
-            readButton.setMinHeight(0);
-            readButton.setPadding(0, 0, 0, 0);
-            readButton.setBackground(createRoundedBackground(Color.TRANSPARENT,
-                    dp(12), Color.TRANSPARENT, 0));
-            actionRow.addView(readButton, new LinearLayout.LayoutParams(dp(38), dp(34)));
-            readButton.setOnClickListener(v -> handleReadAloudClick(message, readButton));
-        }
+        LinearLayout.LayoutParams logoParams =
+                new LinearLayout.LayoutParams(
+                        dp(48),
+                        dp(48)
+                );
 
-        messageCard.addView(actionRow, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, dp(34)));
+        logoParams.leftMargin = dp(8);
 
-        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        cardParams.setMargins(dp(2), dp(5), dp(2), dp(5));
-        messageRow.addView(messageCard, cardParams);
+        topBar.addView(logo, logoParams);
 
-        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        chatContainer.addView(messageRow, rowParams);
-        chatScroll.post(() -> chatScroll.fullScroll(ScrollView.FOCUS_DOWN));
-    }
+        // BRAND TEXT
+        LinearLayout brandContainer =
+                new LinearLayout(this);
 
-    private TextView createMessageActionIcon(String icon, String description) {
-        TextView view = new TextView(this);
-        view.setText(icon);
-        view.setTextSize(19);
-        view.setTextColor(Color.rgb(165, 185, 210));
-        view.setGravity(Gravity.CENTER);
-        view.setContentDescription(description);
-        view.setClickable(true);
-        view.setFocusable(true);
-        return view;
-    }
+        brandContainer.setOrientation(
+                LinearLayout.VERTICAL
+        );
 
-    private void copyMessageToClipboard(String message) {
-        if (message == null || message.trim().isEmpty()) return;
-        try {
-            ClipboardManager clipboard = (ClipboardManager)
-                    getSystemService(Context.CLIPBOARD_SERVICE);
-            if (clipboard != null) {
-                clipboard.setPrimaryClip(ClipData.newPlainText("P AI message", message));
-                showMessage("Message copied.");
-            }
-        } catch (Exception e) {
-            showMessage("Unable to copy this message.");
-        }
-    }
+        brandContainer.setPadding(
+                dp(8),
+                0,
+                0,
+                0
+        );
 
-    // ---------------------------------------------------------------------
-    // Multiple conversations and private local storage
-    // ---------------------------------------------------------------------
+        TextView brand = createText(
+                "P AI",
+                19,
+                WHITE,
+                true
+        );
 
-    private void loadConversations() {
-        String saved = conversationsPreferences.getString(
-                CONVERSATIONS_KEY, "[]");
-        try {
-            conversations = new JSONArray(saved);
-        } catch (JSONException e) {
-            conversations = new JSONArray();
-        }
+        TextView subtitle = createText(
+                "SYSTEM MANAGER",
+                9,
+                CYAN,
+                true
+        );
 
-        activeConversationId = conversationsPreferences.getString(
-                ACTIVE_CONVERSATION_KEY, null);
+        subtitle.setLetterSpacing(0.12f);
 
-        // Migrate the previous single-chat history without deleting it.
-        if (conversations.length() == 0) {
-            String oldHistory = historyPreferences.getString(HISTORY_KEY, "[]");
-            try {
-                JSONArray oldMessages = new JSONArray(oldHistory);
-                if (oldMessages.length() > 0) {
-                    JSONObject migrated = new JSONObject();
-                    String id = UUID.randomUUID().toString();
-                    migrated.put("id", id);
-                    migrated.put("title", deriveConversationTitle(oldMessages));
-                    migrated.put("createdAt", System.currentTimeMillis());
-                    migrated.put("updatedAt", System.currentTimeMillis());
-                    migrated.put("messages", oldMessages);
-                    conversations.put(migrated);
-                    activeConversationId = id;
-                }
-            } catch (JSONException ignored) {
-                // A damaged legacy history must not prevent app startup.
-            }
-        }
+        brandContainer.addView(brand);
 
-        if (findConversation(activeConversationId) == null
-                && conversations.length() > 0) {
-            JSONObject mostRecent = conversations.optJSONObject(
-                    conversations.length() - 1);
-            activeConversationId = mostRecent == null
-                    ? null : mostRecent.optString("id", null);
-        }
+        brandContainer.addView(subtitle);
 
-        if (conversations.length() == 0 || findConversation(activeConversationId) == null) {
-            createConversationRecord("New chat");
-        } else {
-            loadActiveConversationMessages();
-        }
-        trimConversationLimit();
-        saveConversations();
-    }
+        topBar.addView(
+                brandContainer,
+                new LinearLayout.LayoutParams(
+                        0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        1
+                )
+        );
 
-    private JSONObject createConversationRecord(String title) {
-        JSONObject conversation = new JSONObject();
-        String id = UUID.randomUUID().toString();
-        long now = System.currentTimeMillis();
-        try {
-            conversation.put("id", id);
-            conversation.put("title", title);
-            conversation.put("createdAt", now);
-            conversation.put("updatedAt", now);
-            conversation.put("messages", new JSONArray());
-            conversations.put(conversation);
-            activeConversationId = id;
-            conversationHistory = conversation.optJSONArray("messages");
-            trimConversationLimit();
-            saveConversations();
-            return conversation;
-        } catch (JSONException e) {
-            conversationHistory = new JSONArray();
-            return null;
-        }
-    }
+        // ACCOUNT BUTTON
+        TextView accountButton = createText(
+                "◉",
+                25,
+                CYAN,
+                true
+        );
 
-    private JSONObject findConversation(String id) {
-        if (id == null || conversations == null) return null;
-        for (int i = 0; i < conversations.length(); i++) {
-            JSONObject item = conversations.optJSONObject(i);
-            if (item != null && id.equals(item.optString("id", ""))) {
-                return item;
-            }
-        }
-        return null;
-    }
+        accountButton.setGravity(Gravity.CENTER);
 
-    private void loadActiveConversationMessages() {
-        JSONObject active = findConversation(activeConversationId);
-        if (active == null) {
-            conversationHistory = new JSONArray();
-            return;
-        }
-        JSONArray messages = active.optJSONArray("messages");
-        conversationHistory = messages == null ? new JSONArray() : messages;
-    }
+        accountButton.setContentDescription(
+                "Account settings"
+        );
 
-    private void saveConversations() {
-        if (conversations == null) conversations = new JSONArray();
-        conversationsPreferences.edit()
-                .putString(CONVERSATIONS_KEY, conversations.toString())
-                .putString(ACTIVE_CONVERSATION_KEY, activeConversationId == null ? "" : activeConversationId)
-                .apply();
-    }
+        topBar.addView(
+                accountButton,
+                new LinearLayout.LayoutParams(
+                        dp(42),
+                        dp(45)
+                )
+        );
 
-    private void trimConversationLimit() {
-        while (conversations.length() > MAX_CONVERSATIONS) {
-            JSONObject oldest = conversations.optJSONObject(0);
-            String oldestId = oldest == null ? "" : oldest.optString("id", "");
-            // Never evict the active chat while enforcing the storage limit.
-            conversations.remove(oldestId.equals(activeConversationId) ? 1 : 0);
-        }
-    }
+        accountButton.setOnClickListener(
+                v -> openAccountSettings()
+        );
 
-    private String deriveConversationTitle(JSONArray messages) {
-        if (messages != null) {
-            for (int i = 0; i < messages.length(); i++) {
-                JSONObject item = messages.optJSONObject(i);
-                if (item != null && "You".equalsIgnoreCase(
-                        item.optString("sender", ""))) {
-                    String text = item.optString("message", "").trim();
-                    if (!text.isEmpty()) return shortenTitle(text);
-                }
-            }
-        }
-        return "Previous conversation";
-    }
+        mainLayout.addView(
+                topBar,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+        );
 
-    private String shortenTitle(String text) {
-        String clean = text.replaceAll("\\s+", " ").trim();
-        if (clean.length() > 38) return clean.substring(0, 35) + "...";
-        return clean.isEmpty() ? "New chat" : clean;
-    }
+        View divider = new View(this);
 
-    private void restoreConversationHistory() {
-        loadActiveConversationMessages();
-        if (conversationHistory == null || conversationHistory.length() == 0) {
-            addChatMessage("P AI",
-                    "Hello! I am P AI, your personal assistant. How can I help you?");
-            return;
-        }
-        for (int i = 0; i < conversationHistory.length(); i++) {
-            JSONObject item = conversationHistory.optJSONObject(i);
-            if (item != null) {
-                renderChatMessage(item.optString("sender", "System"),
-                        item.optString("message", ""));
-            }
-        }
-    }
+        divider.setBackgroundColor(
+                Color.rgb(29, 53, 82)
+        );
 
-    private void persistChatMessage(String sender, String message) {
-        if (conversationHistory == null) conversationHistory = new JSONArray();
-        try {
-            JSONObject item = new JSONObject();
-            item.put("sender", sender);
-            item.put("message", message);
-            item.put("timestamp", System.currentTimeMillis());
-            conversationHistory.put(item);
-            while (conversationHistory.length() > MAX_SAVED_MESSAGES) {
-                conversationHistory.remove(0);
-            }
-
-            JSONObject active = findConversation(activeConversationId);
-            if (active != null) {
-                active.put("messages", conversationHistory);
-                active.put("updatedAt", System.currentTimeMillis());
-                if ("New chat".equals(active.optString("title", "New chat"))
-                        && "You".equalsIgnoreCase(sender)) {
-                    active.put("title", shortenTitle(message));
-                }
-            }
-            saveConversations();
-        } catch (JSONException e) {
-            showMessage("P AI could not save this message locally.");
-        }
-    }
-
-    private void createNewConversation() {
-        if (requestInProgress) {
-            showMessage("Please wait for P AI to finish the current response.");
-            return;
-        }
-        stopCurrentSpeech();
-        createConversationRecord("New chat");
-        chatContainer.removeAllViews();
-        addChatMessage("P AI",
-                "Hello! I am P AI, your personal assistant. How can I help you?");
-        updateStatus("New conversation");
-    }
-
-    private void showConversationHistory() {
-        if (requestInProgress) {
-            showMessage("Please wait until the current response is complete.");
-            return;
-        }
-        if (conversations == null || conversations.length() == 0) {
-            showMessage("No saved conversations yet.");
-            return;
-        }
-
-        final String[] ids = new String[conversations.length()];
-        String[] titles = new String[conversations.length()];
-        for (int i = conversations.length() - 1, display = 0; i >= 0; i--, display++) {
-            JSONObject item = conversations.optJSONObject(i);
-            ids[display] = item == null ? "" : item.optString("id", "");
-            String title = item == null ? "Untitled chat" : item.optString("title", "New chat");
-            titles[display] = (ids[display].equals(activeConversationId) ? "✓  " : "") + title;
-        }
-
-        new AlertDialog.Builder(this)
-                .setTitle("CHAT HISTORY")
-                .setItems(titles, (dialog, which) -> showConversationOptions(ids[which]))
-                .setNegativeButton("CLOSE", null)
-                .show();
-    }
-
-    private void showConversationOptions(String conversationId) {
-        JSONObject selected = findConversation(conversationId);
-        if (selected == null) return;
-        String title = selected.optString("title", "New chat");
-        String[] actions = {"OPEN CHAT", "RENAME CHAT", "DELETE CHAT"};
-        new AlertDialog.Builder(this)
-                .setTitle(title)
-                .setItems(actions, (dialog, which) -> {
-                    if (which == 0) openConversation(conversationId);
-                    else if (which == 1) renameConversation(conversationId);
-                    else confirmDeleteConversation(conversationId);
-                })
-                .setNegativeButton("CANCEL", null)
-                .show();
-    }
-
-    private void openConversation(String conversationId) {
-        if (requestInProgress) return;
-        JSONObject selected = findConversation(conversationId);
-        if (selected == null) return;
-        stopCurrentSpeech();
-        activeConversationId = conversationId;
-        loadActiveConversationMessages();
-        chatContainer.removeAllViews();
-        for (int i = 0; i < conversationHistory.length(); i++) {
-            JSONObject item = conversationHistory.optJSONObject(i);
-            if (item != null) renderChatMessage(
-                    item.optString("sender", "System"),
-                    item.optString("message", ""));
-        }
-        saveConversations();
-        updateStatus("Opened: " + selected.optString("title", "Chat"));
-    }
-
-    private void renameConversation(String conversationId) {
-        JSONObject selected = findConversation(conversationId);
-        if (selected == null) return;
-        EditText titleInput = new EditText(this);
-        titleInput.setSingleLine(true);
-        titleInput.setText(selected.optString("title", "New chat"));
-        titleInput.setSelection(titleInput.getText().length());
-        int padding = dp(20);
-        LinearLayout holder = new LinearLayout(this);
-        holder.setPadding(padding, dp(4), padding, 0);
-        holder.addView(titleInput);
-        new AlertDialog.Builder(this)
-                .setTitle("RENAME CHAT")
-                .setView(holder)
-                .setNegativeButton("CANCEL", null)
-                .setPositiveButton("SAVE", (dialog, which) -> {
-                    String name = titleInput.getText().toString().trim();
-                    if (name.isEmpty()) {
-                        showMessage("Chat title cannot be empty.");
-                        return;
-                    }
-                    try {
-                        selected.put("title", shortenTitle(name));
-                        selected.put("updatedAt", System.currentTimeMillis());
-                        saveConversations();
-                        if (conversationId.equals(activeConversationId)) {
-                            updateStatus("Chat renamed: " + shortenTitle(name));
-                        }
-                    } catch (JSONException e) {
-                        showMessage("Unable to rename this chat.");
-                    }
-                })
-                .show();
-    }
-
-    private void confirmDeleteConversation(String conversationId) {
-        JSONObject selected = findConversation(conversationId);
-        if (selected == null) return;
-        String title = selected.optString("title", "this chat");
-        new AlertDialog.Builder(this)
-                .setTitle("DELETE CHAT?")
-                .setMessage("Permanently delete \"" + title + "\"? This cannot be undone.")
-                .setNegativeButton("CANCEL", null)
-                .setPositiveButton("DELETE", (dialog, which) -> deleteConversation(conversationId))
-                .show();
-    }
-
-    private void deleteConversation(String conversationId) {
-        if (requestInProgress) {
-            showMessage("Wait for the current response before deleting a chat.");
-            return;
-        }
-        int removeIndex = -1;
-        for (int i = 0; i < conversations.length(); i++) {
-            JSONObject item = conversations.optJSONObject(i);
-            if (item != null && conversationId.equals(item.optString("id", ""))) {
-                removeIndex = i;
-                break;
-            }
-        }
-        if (removeIndex < 0) return;
-        boolean deletingActive = conversationId.equals(activeConversationId);
-        conversations.remove(removeIndex);
-        if (deletingActive) {
-            if (conversations.length() == 0) {
-                createConversationRecord("New chat");
-            } else {
-                JSONObject next = conversations.optJSONObject(conversations.length() - 1);
-                activeConversationId = next == null ? null : next.optString("id", null);
-                loadActiveConversationMessages();
-            }
-            chatContainer.removeAllViews();
-            restoreConversationHistory();
-        }
-        saveConversations();
-        updateStatus("Conversation deleted");
-        showMessage("Chat deleted.");
-    }
-
-    // ---------------------------------------------------------------------
-    // Status and utility methods
-    // ---------------------------------------------------------------------
-
-    private void updateStatus(String message) {
-        if (!isActivityDestroyed && statusText != null) {
-            statusText.setText(message);
-        }
-    }
-
-    private int dp(float value) {
-        return (int) (
-                value * getResources().getDisplayMetrics().density + 0.5f
+        mainLayout.addView(
+                divider,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(1)
+                )
         );
     }
 
-    private void showMessage(String message) {
-        if (!isActivityDestroyed) {
+    // =========================================================
+    // WELCOME SECTION
+    // =========================================================
+
+    private void buildWelcomeSection() {
+
+        TextView greeting = createText(
+                "Welcome to P AI",
+                25,
+                WHITE,
+                true
+        );
+
+        contentContainer.addView(greeting);
+
+        TextView description = createText(
+                "Your intelligent personal assistant and device manager.",
+                13,
+                MUTED,
+                false
+        );
+
+        LinearLayout.LayoutParams descriptionParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        descriptionParams.topMargin = dp(7);
+
+        contentContainer.addView(
+                description,
+                descriptionParams
+        );
+
+        // STATUS CARD
+        LinearLayout statusCard = new LinearLayout(this);
+
+        statusCard.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        statusCard.setPadding(
+                dp(16),
+                dp(15),
+                dp(16),
+                dp(15)
+        );
+
+        statusCard.setBackground(
+                roundedBackground(PANEL_LIGHT, 16, CYAN)
+        );
+
+        LinearLayout.LayoutParams cardParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        cardParams.topMargin = dp(20);
+
+        contentContainer.addView(
+                statusCard,
+                cardParams
+        );
+
+        LinearLayout statusRow = new LinearLayout(this);
+
+        statusRow.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+
+        TextView indicator = createText(
+                "●",
+                16,
+                GREEN,
+                true
+        );
+
+        statusRow.addView(indicator);
+
+        TextView statusTitle = createText(
+                "  P AI SYSTEM MANAGER",
+                14,
+                WHITE,
+                true
+        );
+
+        statusRow.addView(statusTitle);
+
+        statusCard.addView(statusRow);
+
+        statusMessage = createText(
+                "Dashboard ready",
+                12,
+                MUTED,
+                false
+        );
+
+        LinearLayout.LayoutParams messageParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        messageParams.topMargin = dp(7);
+
+        statusCard.addView(
+                statusMessage,
+                messageParams
+        );
+    }
+
+    // =========================================================
+    // DEVICE OVERVIEW
+    // =========================================================
+
+    private void buildDeviceOverview() {
+
+        addSectionTitle(
+                "Device Overview",
+                "Your device information"
+        );
+
+        LinearLayout firstRow = new LinearLayout(this);
+
+        firstRow.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        storageValue = createText(
+                "--",
+                23,
+                CYAN,
+                true
+        );
+
+        ramValue = createText(
+                "--",
+                23,
+                CYAN,
+                true
+        );
+
+        firstRow.addView(
+                createInformationCard(
+                        "▤",
+                        "Storage",
+                        storageValue,
+                        "Available space"
+                ),
+                weightedParams()
+        );
+
+        firstRow.addView(
+                createInformationCard(
+                        "▦",
+                        "Memory",
+                        ramValue,
+                        "RAM usage"
+                ),
+                weightedParams()
+        );
+
+        contentContainer.addView(firstRow);
+
+        LinearLayout secondRow = new LinearLayout(this);
+
+        secondRow.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        batteryValue = createText(
+                "--",
+                23,
+                CYAN,
+                true
+        );
+
+        androidValue = createText(
+                "--",
+                23,
+                CYAN,
+                true
+        );
+
+        secondRow.addView(
+                createInformationCard(
+                        "▰",
+                        "Battery",
+                        batteryValue,
+                        "Battery level"
+                ),
+                weightedParams()
+        );
+
+        secondRow.addView(
+                createInformationCard(
+                        "◈",
+                        "Android",
+                        androidValue,
+                        "Operating system"
+                ),
+                weightedParams()
+        );
+
+        LinearLayout.LayoutParams rowParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        rowParams.topMargin = dp(10);
+
+        contentContainer.addView(
+                secondRow,
+                rowParams
+        );
+    }
+
+    // =========================================================
+    // END OF PART 1
+    // =========================================================
+
+    // =========================================================
+    // INFORMATION CARD
+    // =========================================================
+
+    private View createInformationCard(
+            String icon,
+            String title,
+            TextView value,
+            String description
+    ) {
+
+        LinearLayout card = new LinearLayout(this);
+
+        card.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        card.setPadding(
+                dp(13),
+                dp(14),
+                dp(10),
+                dp(14)
+        );
+
+        card.setBackground(
+                roundedBackground(PANEL, 14, PANEL_LIGHT)
+        );
+
+        TextView iconView = createText(
+                icon,
+                21,
+                CYAN,
+                true
+        );
+
+        card.addView(iconView);
+
+        TextView titleView = createText(
+                title,
+                12,
+                MUTED,
+                true
+        );
+
+        LinearLayout.LayoutParams titleParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        titleParams.topMargin = dp(9);
+
+        card.addView(titleView, titleParams);
+
+        value.setSingleLine(true);
+
+        value.setTextSize(21);
+
+        LinearLayout.LayoutParams valueParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        valueParams.topMargin = dp(5);
+
+        card.addView(value, valueParams);
+
+        TextView descriptionView = createText(
+                description,
+                10,
+                MUTED,
+                false
+        );
+
+        LinearLayout.LayoutParams descriptionParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        descriptionParams.topMargin = dp(4);
+
+        card.addView(
+                descriptionView,
+                descriptionParams
+        );
+
+        return card;
+    }
+
+    // =========================================================
+    // FEATURE SECTION
+    // =========================================================
+
+    private void buildFeatureSection() {
+
+        addSectionTitle(
+                "Quick Access",
+                "Manage your phone and access P AI tools"
+        );
+
+        LinearLayout firstRow = new LinearLayout(this);
+
+        firstRow.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        firstRow.addView(
+                createFeatureCard(
+                        "✦",
+                        "AI Chat",
+                        "Talk with P AI",
+                        CYAN,
+                        this::openChat
+                ),
+                weightedParams()
+        );
+
+        firstRow.addView(
+                createFeatureCard(
+                        "▦",
+                        "App Manager",
+                        "Manage applications",
+                        BLUE,
+                        this::openAppManager
+                ),
+                weightedParams()
+        );
+
+        contentContainer.addView(firstRow);
+
+        LinearLayout secondRow = new LinearLayout(this);
+
+        secondRow.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        secondRow.addView(
+                createFeatureCard(
+                        "◈",
+                        "Device Manager",
+                        "Device information",
+                        CYAN,
+                        this::openDeviceManager
+                ),
+                weightedParams()
+        );
+
+        secondRow.addView(
+                createFeatureCard(
+                        "♫",
+                        "Voice Assistant",
+                        "Voice features",
+                        BLUE,
+                        this::openVoiceAssistant
+                ),
+                weightedParams()
+        );
+
+        LinearLayout.LayoutParams secondParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        secondParams.topMargin = dp(10);
+
+        contentContainer.addView(
+                secondRow,
+                secondParams
+        );
+
+        LinearLayout thirdRow = new LinearLayout(this);
+
+        thirdRow.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        thirdRow.addView(
+                createFeatureCard(
+                        "⚙",
+                        "Tools",
+                        "Explore utilities",
+                        CYAN,
+                        this::openTools
+                ),
+                weightedParams()
+        );
+
+        thirdRow.addView(
+                createFeatureCard(
+                        "◉",
+                        "Preferences",
+                        "Personalise P AI",
+                        BLUE,
+                        this::openPreferences
+                ),
+                weightedParams()
+        );
+
+        LinearLayout.LayoutParams thirdParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        thirdParams.topMargin = dp(10);
+
+        contentContainer.addView(
+                thirdRow,
+                thirdParams
+        );
+    }
+
+    // =========================================================
+    // FEATURE CARD
+    // =========================================================
+
+    private View createFeatureCard(
+            String icon,
+            String title,
+            String description,
+            int iconColor,
+            Runnable action
+    ) {
+
+        LinearLayout card = new LinearLayout(this);
+
+        card.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        card.setGravity(Gravity.CENTER_VERTICAL);
+
+        card.setPadding(
+                dp(13),
+                dp(16),
+                dp(10),
+                dp(16)
+        );
+
+        card.setBackground(
+                roundedBackground(PANEL, 15, PANEL_LIGHT)
+        );
+
+        card.setClickable(true);
+
+        card.setFocusable(true);
+
+        TextView iconView = createText(
+                icon,
+                25,
+                iconColor,
+                true
+        );
+
+        card.addView(iconView);
+
+        TextView titleView = createText(
+                title,
+                13,
+                WHITE,
+                true
+        );
+
+        LinearLayout.LayoutParams titleParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        titleParams.topMargin = dp(11);
+
+        card.addView(titleView, titleParams);
+
+        TextView descriptionView = createText(
+                description,
+                10,
+                MUTED,
+                false
+        );
+
+        descriptionView.setMaxLines(2);
+
+        LinearLayout.LayoutParams descriptionParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        descriptionParams.topMargin = dp(5);
+
+        card.addView(
+                descriptionView,
+                descriptionParams
+        );
+
+        card.setOnClickListener(v -> action.run());
+
+        return card;
+    }
+
+    // =========================================================
+    // RECENT ACTIVITY
+    // =========================================================
+
+    private void buildRecentActivitySection() {
+
+        addSectionTitle(
+                "Recent Activity",
+                "Your dashboard activity"
+        );
+
+        LinearLayout activityCard = new LinearLayout(this);
+
+        activityCard.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        activityCard.setPadding(
+                dp(15),
+                dp(15),
+                dp(15),
+                dp(15)
+        );
+
+        activityCard.setBackground(
+                roundedBackground(PANEL, 15, PANEL_LIGHT)
+        );
+
+        TextView activity = createText(
+                "●  Dashboard opened",
+                13,
+                WHITE,
+                false
+        );
+
+        activityCard.addView(activity);
+
+        TextView activityDescription = createText(
+                "P AI System Manager is ready for use.",
+                11,
+                MUTED,
+                false
+        );
+
+        LinearLayout.LayoutParams activityParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        activityParams.topMargin = dp(8);
+
+        activityCard.addView(
+                activityDescription,
+                activityParams
+        );
+
+        contentContainer.addView(activityCard);
+    }
+
+    // =========================================================
+    // BOTTOM NAVIGATION
+    // =========================================================
+
+    private void buildBottomNavigation() {
+
+        LinearLayout navigation = new LinearLayout(this);
+
+        navigation.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        navigation.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+
+        navigation.setBackgroundColor(
+                Color.rgb(12, 22, 39)
+        );
+
+        navigation.setPadding(
+                dp(5),
+                dp(8),
+                dp(5),
+                dp(8)
+        );
+
+        addBottomItem(
+                navigation,
+                "⌂",
+                "Home",
+                true,
+                this::showDashboard
+        );
+
+        addBottomItem(
+                navigation,
+                "◌",
+                "Chat",
+                false,
+                this::openChat
+        );
+
+        addBottomItem(
+                navigation,
+                "▦",
+                "Tools",
+                false,
+                this::openTools
+        );
+
+        addBottomItem(
+                navigation,
+                "⚙",
+                "Settings",
+                false,
+                this::openPreferences
+        );
+
+        mainLayout.addView(
+                navigation,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(66)
+                )
+        );
+    }
+
+    private void addBottomItem(
+            LinearLayout parent,
+            String icon,
+            String label,
+            boolean selected,
+            Runnable action
+    ) {
+
+        LinearLayout item = new LinearLayout(this);
+
+        item.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        item.setGravity(Gravity.CENTER);
+
+        TextView iconView = createText(
+                icon,
+                22,
+                selected ? CYAN : MUTED,
+                true
+        );
+
+        TextView labelView = createText(
+                label,
+                10,
+                selected ? CYAN : MUTED,
+                true
+        );
+
+        item.addView(iconView);
+
+        LinearLayout.LayoutParams labelParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        labelParams.topMargin = dp(3);
+
+        item.addView(labelView, labelParams);
+
+        item.setOnClickListener(v -> action.run());
+
+        parent.addView(
+                item,
+                new LinearLayout.LayoutParams(
+                        0,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        1
+                )
+        );
+    }
+
+    // =========================================================
+    // NAVIGATION DRAWER
+    // =========================================================
+
+    private void showNavigationDrawer() {
+
+        final String[] menuItems = {
+                "Dashboard",
+                "AI Chat",
+                "App Manager",
+                "Device Manager",
+                "Voice Assistant",
+                "Tools",
+                "Account Settings",
+                "Preferences",
+                "Help and About",
+                "Log Out"
+        };
+
+        AlertDialog.Builder builder =
+                new AlertDialog.Builder(this);
+
+        LinearLayout drawer = new LinearLayout(this);
+
+        drawer.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        drawer.setPadding(
+                dp(18),
+                dp(22),
+                dp(18),
+                dp(15)
+        );
+
+        drawer.setBackgroundColor(BACKGROUND);
+
+        ImageView logo = new ImageView(this);
+
+        logo.setImageResource(
+                R.drawable.p_ai_launcher
+        );
+
+        logo.setScaleType(
+                ImageView.ScaleType.FIT_CENTER
+        );
+
+        LinearLayout.LayoutParams logoParams =
+                new LinearLayout.LayoutParams(
+                        dp(90),
+                        dp(90)
+                );
+
+        logoParams.gravity = Gravity.CENTER_HORIZONTAL;
+
+        drawer.addView(logo, logoParams);
+
+        TextView heading = createText(
+                "P AI SYSTEM MANAGER",
+                17,
+                WHITE,
+                true
+        );
+
+        heading.setGravity(Gravity.CENTER);
+
+        LinearLayout.LayoutParams headingParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        headingParams.topMargin = dp(7);
+
+        headingParams.bottomMargin = dp(18);
+
+        drawer.addView(heading, headingParams);
+
+        AlertDialog dialog = builder.create();
+
+        for (int i = 0; i < menuItems.length; i++) {
+
+            final int selectedIndex = i;
+
+            TextView menuItem = createText(
+                    menuItems[i],
+                    14,
+                    i == 9 ? Color.rgb(255, 110, 110) : WHITE,
+                    i == 0
+            );
+
+            menuItem.setGravity(
+                    Gravity.CENTER_VERTICAL
+            );
+
+            menuItem.setPadding(
+                    dp(14),
+                    dp(13),
+                    dp(10),
+                    dp(13)
+            );
+
+            menuItem.setBackground(
+                    roundedBackground(PANEL, 10, PANEL)
+            );
+
+            LinearLayout.LayoutParams itemParams =
+                    new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                    );
+
+            itemParams.bottomMargin = dp(6);
+
+            drawer.addView(menuItem, itemParams);
+
+            menuItem.setOnClickListener(v -> {
+
+                dialog.dismiss();
+
+                handleDrawerSelection(selectedIndex);
+            });
+        }
+
+        ScrollView drawerScroll = new ScrollView(this);
+
+        drawerScroll.addView(drawer);
+
+        dialog.setView(
+                drawerScroll,
+                dp(12),
+                dp(8),
+                dp(12),
+                dp(8)
+        );
+
+        dialog.show();
+    }
+
+    // =========================================================
+    // END OF PART 2
+    // =========================================================
+
+    // =========================================================
+    // DRAWER NAVIGATION ACTIONS
+    // =========================================================
+
+    private void handleDrawerSelection(int position) {
+
+        switch (position) {
+
+            case 0:
+                showDashboard();
+                break;
+
+            case 1:
+                openChat();
+                break;
+
+            case 2:
+                openAppManager();
+                break;
+
+            case 3:
+                openDeviceManager();
+                break;
+
+            case 4:
+                openVoiceAssistant();
+                break;
+
+            case 5:
+                openTools();
+                break;
+
+            case 6:
+                openAccountSettings();
+                break;
+
+            case 7:
+                openPreferences();
+                break;
+
+            case 8:
+                showHelpAndAbout();
+                break;
+
+            case 9:
+                showLogoutNotice();
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    // =========================================================
+    // DASHBOARD NAVIGATION
+    // =========================================================
+
+    private void showDashboard() {
+
+        Toast.makeText(
+                this,
+                "You are on the dashboard.",
+                Toast.LENGTH_SHORT
+        ).show();
+    }
+
+    // =========================================================
+    // CHAT NAVIGATION
+    // =========================================================
+
+    private void openChat() {
+
+        try {
+
+            Intent intent = new Intent();
+
+            intent.setClassName(
+                    this,
+                    getPackageName() + ".ChatActivity"
+            );
+
+            startActivity(intent);
+
+        } catch (Exception e) {
+
             Toast.makeText(
                     this,
-                    message,
+                    "The AI Chat screen is being integrated.",
                     Toast.LENGTH_LONG
             ).show();
         }
     }
 
-    private void hideKeyboard() {
+    // =========================================================
+    // APP MANAGER
+    // =========================================================
+
+    private void openAppManager() {
+
         try {
-            InputMethodManager manager =
-                    (InputMethodManager) getSystemService(
-                            Context.INPUT_METHOD_SERVICE
-                    );
 
-            if (manager != null && messageInput != null) {
-                manager.hideSoftInputFromWindow(
-                        messageInput.getWindowToken(),
-                        0
-                );
-            }
-        } catch (Exception ignored) {
-            // Keyboard visibility is not critical to app operation.
-        }
-    }
+            Intent intent = new Intent(
+                    Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS
+            );
 
-    // ---------------------------------------------------------------------
-    // Text-to-speech initialization and user-controlled playback
-    // ---------------------------------------------------------------------
+            startActivity(intent);
 
-    private void initializeTextToSpeech() {
-        textToSpeech = new TextToSpeech(
-                this,
-                status -> {
-                    if (isActivityDestroyed || textToSpeech == null) {
-                        return;
-                    }
+        } catch (Exception e) {
 
-                    if (status != TextToSpeech.SUCCESS) {
-                        textToSpeechReady = false;
-                        updateStatus("Text-to-speech is unavailable.");
-                        return;
-                    }
-
-                    int languageResult =
-                            textToSpeech.setLanguage(Locale.US);
-
-                    textToSpeechReady =
-                            languageResult != TextToSpeech.LANG_MISSING_DATA
-                                    && languageResult
-                                    != TextToSpeech.LANG_NOT_SUPPORTED;
-
-                    if (textToSpeechReady) {
-                        updateStatus("Ready");
-                    } else {
-                        updateStatus("English speech data is unavailable.");
-                    }
-
-                    textToSpeech.setOnUtteranceProgressListener(
-                            new UtteranceProgressListener() {
-                                @Override
-                                public void onStart(String utteranceId) {
-                                    // Playback state is reflected by the button.
-                                }
-
-                                @Override
-                                public void onDone(String utteranceId) {
-                                    finishSpeechIfCurrent(utteranceId);
-                                }
-
-                                @Override
-                                public void onError(String utteranceId) {
-                                    finishSpeechIfCurrent(utteranceId);
-                                }
-
-                                @Override
-                                public void onError(
-                                        String utteranceId,
-                                        int errorCode
-                                ) {
-                                    finishSpeechIfCurrent(utteranceId);
-                                }
-                            }
-                    );
-                }
-        );
-    }
-
-    private void handleReadAloudClick(String message, Button button) {
-        if (!textToSpeechReady || textToSpeech == null) {
             showMessage(
-                    "Speech is not ready yet. Please try again shortly."
+                    "Application settings are unavailable on this device."
             );
-            return;
         }
-
-        if (button == activeSpeechButton) {
-            stopCurrentSpeech();
-            return;
-        }
-
-        startReadingMessage(message, button);
     }
 
-    private void startReadingMessage(String message, Button button) {
-        if (textToSpeech == null || !textToSpeechReady) {
-            showMessage("Text-to-speech is not available.");
-            return;
-        }
+    // =========================================================
+    // DEVICE MANAGER
+    // =========================================================
 
-        stopCurrentSpeech();
+    private void openDeviceManager() {
 
-        String cleanText = message == null ? "" : message.trim();
+        try {
 
-        if (cleanText.isEmpty()) {
-            return;
-        }
-
-        activeSpeechRequestId = UUID.randomUUID().toString();
-        activeSpeechButton = button;
-        button.setText("■");
-
-        List<String> chunks = splitTextForSpeech(
-                cleanText,
-                MAX_TTS_CHUNK_LENGTH
-        );
-
-        if (chunks.isEmpty()) {
-            resetSpeechButton();
-            return;
-        }
-
-        activeSpeechFinalUtteranceId =
-                activeSpeechRequestId + "_part_" + (chunks.size() - 1);
-
-        for (int i = 0; i < chunks.size(); i++) {
-            String utteranceId =
-                    activeSpeechRequestId + "_part_" + i;
-
-            int queueMode = i == 0
-                    ? TextToSpeech.QUEUE_FLUSH
-                    : TextToSpeech.QUEUE_ADD;
-
-            int result = textToSpeech.speak(
-                    chunks.get(i),
-                    queueMode,
-                    null,
-                    utteranceId
+            startActivity(
+                    new Intent(Settings.ACTION_SETTINGS)
             );
 
-            if (result == TextToSpeech.ERROR) {
-                stopCurrentSpeech();
-                showMessage("P AI could not start speaking this response.");
-                return;
-            }
-        }
-    }
+        } catch (Exception e) {
 
-    /**
-     * Splits long responses into word-safe pieces so Android TTS does not
-     * reject a response that exceeds its per-utterance length limit.
-     */
-    private List<String> splitTextForSpeech(String text, int maxLength) {
-        List<String> chunks = new ArrayList<>();
-
-        if (text == null || text.trim().isEmpty()) {
-            return chunks;
-        }
-
-        String remaining = text.trim();
-
-        while (remaining.length() > maxLength) {
-            int splitAt = remaining.lastIndexOf(' ', maxLength);
-
-            if (splitAt <= 0) {
-                splitAt = maxLength;
-            }
-
-            // Avoid splitting a UTF-16 surrogate pair.
-            if (splitAt > 0
-                    && splitAt < remaining.length()
-                    && Character.isHighSurrogate(
-                            remaining.charAt(splitAt - 1))
-                    && Character.isLowSurrogate(
-                            remaining.charAt(splitAt))) {
-                splitAt--;
-            }
-
-            chunks.add(remaining.substring(0, splitAt).trim());
-            remaining = remaining.substring(splitAt).trim();
-        }
-
-        if (!remaining.isEmpty()) {
-            chunks.add(remaining);
-        }
-
-        return chunks;
-    }
-
-    private void finishSpeechIfCurrent(String utteranceId) {
-        runOnUiThread(() -> {
-            if (isActivityDestroyed) {
-                return;
-            }
-
-            if (activeSpeechFinalUtteranceId != null
-                    && activeSpeechFinalUtteranceId.equals(utteranceId)) {
-                resetSpeechButton();
-            }
-        });
-    }
-
-    private void stopCurrentSpeech() {
-        if (textToSpeech != null) {
-            try {
-                textToSpeech.stop();
-            } catch (Exception ignored) {
-                // Continue resetting the UI even if stop fails.
-            }
-        }
-
-        resetSpeechButton();
-    }
-
-    private void resetSpeechButton() {
-        if (activeSpeechButton != null) {
-            activeSpeechButton.setText("🔊");
-        }
-
-        activeSpeechButton = null;
-        activeSpeechRequestId = null;
-        activeSpeechFinalUtteranceId = null;
-    }
-
-    // ---------------------------------------------------------------------
-    // Microphone permission and manual online speech recognition
-    // ---------------------------------------------------------------------
-
-    private boolean hasAudioPermission() {
-        return checkSelfPermission(
-                Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED;
-    }
-
-    private void startManualVoiceRecognition() {
-        if (!hasAudioPermission()) {
-            requestPermissions(
-                    new String[]{Manifest.permission.RECORD_AUDIO},
-                    AUDIO_PERMISSION_REQUEST
-            );
-            updateStatus("Microphone permission is required for voice input.");
-            return;
-        }
-
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             showMessage(
-                    "Speech recognition is unavailable on this device."
+                    "Device settings could not be opened."
             );
-            return;
-        }
-
-        Intent intent = new Intent(
-                RecognizerIntent.ACTION_RECOGNIZE_SPEECH
-        );
-
-        intent.putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-        );
-
-        intent.putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE,
-                Locale.US
-        );
-
-        intent.putExtra(
-                RecognizerIntent.EXTRA_PROMPT,
-                "Speak to P AI"
-        );
-
-        intent.putExtra(
-                RecognizerIntent.EXTRA_MAX_RESULTS,
-                1
-        );
-
-        try {
-            startActivityForResult(intent, SPEECH_REQUEST);
-        } catch (Exception e) {
-            showMessage("Unable to start voice recognition.");
         }
     }
 
-    @Override
-    public void onRequestPermissionsResult(
-            int requestCode,
-            String[] permissions,
-            int[] grantResults
-    ) {
-        super.onRequestPermissionsResult(
-                requestCode,
-                permissions,
-                grantResults
-        );
+    // =========================================================
+    // VOICE ASSISTANT
+    // =========================================================
 
-        if (requestCode == AUDIO_PERMISSION_REQUEST) {
-            if (grantResults.length > 0
-                    && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                updateStatus("Microphone permission granted.");
-                showMessage("You can now use voice input.");
-            } else {
-                updateStatus("Microphone permission denied.");
-                showMessage(
-                        "Microphone permission is needed for voice input."
-                );
-            }
-        }
+    private void openVoiceAssistant() {
+
+        showFeatureNotice(
+                "Voice Assistant",
+                "Voice assistant controls will be integrated in a dedicated development stage. Background Vosk listening will not be started from the chat screen."
+        );
     }
 
-    @Override
-    protected void onActivityResult(
-            int requestCode,
-            int resultCode,
-            Intent data
-    ) {
-        super.onActivityResult(requestCode, resultCode, data);
+    // =========================================================
+    // TOOLS
+    // =========================================================
 
-        if (requestCode == SPEECH_REQUEST
-                && resultCode == RESULT_OK
-                && data != null) {
+    private void openTools() {
 
-            ArrayList<String> results =
-                    data.getStringArrayListExtra(
-                            RecognizerIntent.EXTRA_RESULTS
+        final String[] tools = {
+                "Storage Information",
+                "Battery Information",
+                "Android Information",
+                "System Settings"
+        };
+
+        new AlertDialog.Builder(this)
+                .setTitle("P AI Tools")
+                .setItems(tools, (dialog, which) -> {
+
+                    switch (which) {
+
+                        case 0:
+                            showStorageInformation();
+                            break;
+
+                        case 1:
+                            showBatteryInformation();
+                            break;
+
+                        case 2:
+                            showAndroidInformation();
+                            break;
+
+                        case 3:
+                            openDeviceManager();
+                            break;
+                    }
+
+                })
+                .setNegativeButton("Close", null)
+                .show();
+    }
+
+    // =========================================================
+    // PREFERENCES
+    // =========================================================
+
+    private void openPreferences() {
+
+        final String[] options = {
+                "Appearance",
+                "Chat Preferences",
+                "Voice Preferences",
+                "Tools Preferences",
+                "Device Preferences",
+                "Account Settings"
+        };
+
+        new AlertDialog.Builder(this)
+                .setTitle("P AI Preferences")
+                .setItems(options, (dialog, which) -> {
+
+                    String selected = options[which];
+
+                    showFeatureNotice(
+                            selected,
+                            "This preference section will be implemented in its dedicated development stage."
                     );
 
-            if (results != null && !results.isEmpty()) {
-                String spokenText = results.get(0);
-
-                if (messageInput != null) {
-                    messageInput.setText(spokenText);
-                    messageInput.setSelection(
-                            messageInput.getText().length()
-                    );
-                }
-
-                sendMessage();
-            }
-        }
+                })
+                .setNegativeButton("Close", null)
+                .show();
     }
 
-    // ---------------------------------------------------------------------
-    // AI chat request handling
-    // ---------------------------------------------------------------------
+    // =========================================================
+    // ACCOUNT SETTINGS
+    // =========================================================
 
-    /**
-     * Builds the recent context for the backend from the currently active chat.
-     * The current question is already sent separately as the final user turn,
-     * so it is excluded here to prevent duplicate prompts.
-     */
-    private JSONArray buildContextHistory(String currentQuestion) {
-        JSONArray result = new JSONArray();
-        if (conversationHistory == null || conversationHistory.length() == 0) {
-            return result;
-        }
+    private void openAccountSettings() {
 
-        ArrayList<JSONObject> eligibleMessages = new ArrayList<>();
-        boolean skippedCurrentQuestion = false;
-        int totalCharacters = 0;
-
-        // Walk backwards so the newest messages are retained within the limits.
-        for (int i = conversationHistory.length() - 1; i >= 0; i--) {
-            JSONObject saved = conversationHistory.optJSONObject(i);
-            if (saved == null) continue;
-
-            String sender = saved.optString("sender", "").trim();
-            String content = saved.optString("message", "").trim();
-            if (content.isEmpty()) continue;
-
-            String role;
-            if ("You".equalsIgnoreCase(sender)) {
-                role = "user";
-            } else if ("P AI".equalsIgnoreCase(sender)) {
-                role = "assistant";
-            } else {
-                // Do not send system notices or local command feedback as context.
-                continue;
-            }
-
-            if (!skippedCurrentQuestion
-                    && "user".equals(role)
-                    && content.equals(currentQuestion == null ? "" : currentQuestion.trim())) {
-                skippedCurrentQuestion = true;
-                continue;
-            }
-
-            if (content.length() > MAX_CONTEXT_ITEM_LENGTH) {
-                content = content.substring(content.length() - MAX_CONTEXT_ITEM_LENGTH);
-            }
-            if (totalCharacters + content.length() > MAX_CONTEXT_TOTAL_LENGTH) {
-                int remaining = MAX_CONTEXT_TOTAL_LENGTH - totalCharacters;
-                if (remaining <= 0) break;
-                content = content.substring(content.length() - remaining);
-            }
-
-            try {
-                JSONObject contextItem = new JSONObject();
-                contextItem.put("role", role);
-                contextItem.put("content", content);
-                eligibleMessages.add(contextItem);
-                totalCharacters += content.length();
-            } catch (JSONException ignored) {
-                // Skip a malformed item without interrupting the chat request.
-            }
-
-            if (eligibleMessages.size() >= MAX_CONTEXT_HISTORY_MESSAGES
-                    || totalCharacters >= MAX_CONTEXT_TOTAL_LENGTH) {
-                break;
-            }
-        }
-
-        // Reverse the backward collection to restore normal conversation order.
-        for (int i = eligibleMessages.size() - 1; i >= 0; i--) {
-            result.put(eligibleMessages.get(i));
-        }
-        return result;
+        showFeatureNotice(
+                "Account Settings",
+                "Your existing authentication system is preserved. Account management will be integrated without replacing AuthSessionManager."
+        );
     }
 
-    private void sendMessage() {
-        if (isActivityDestroyed) {
-            return;
-        }
+    // =========================================================
+    // LOGOUT
+    // =========================================================
 
-        if (requestInProgress) {
-            showMessage("P AI is still preparing the previous response.");
-            return;
-        }
+    private void showLogoutNotice() {
 
-        String question = messageInput.getText()
-                .toString()
-                .trim();
-
-        if (question.isEmpty()) {
-            messageInput.setError("Enter a message first.");
-            return;
-        }
-
-        hideKeyboard();
-
-        // Handle supported local app-launch commands without using data.
-        if (question.toLowerCase(Locale.ROOT).startsWith("open ")) {
-            messageInput.setText("");
-            addChatMessage("You", question);
-            openInstalledApplication(question.substring(5).trim());
-            return;
-        }
-
-        messageInput.setText("");
-        addChatMessage("You", question);
-
-        requestInProgress = true;
-        sendButton.setEnabled(false);
-        sendButton.setText("…");
-        updateStatus("P AI is thinking...");
-        updateComposerButtons();
-
-        // Capture history on the UI thread so the request receives a stable
-        // snapshot while the background network operation is running.
-        JSONArray contextHistory = buildContextHistory(question);
-        String contextHistoryJson = contextHistory.toString();
-
-        try {
-            aiExecutor.execute(
-                    () -> performAIRequest(question, contextHistoryJson)
-            );
-        } catch (Exception e) {
-            requestInProgress = false;
-            restoreSendButton();
-
-            addChatMessage(
-                    "System",
-                    "P AI could not start the request. Please try again."
-            );
-
-            updateStatus("Unable to start AI request.");
-        }
-    }
-
-    private void performAIRequest(
-            String question,
-            String contextHistoryJson
-    ) {
-        HttpURLConnection connection = null;
-
-        try {
-            URL url = new URL(API_URL);
-            connection = (HttpURLConnection) url.openConnection();
-
-            connection.setRequestMethod("POST");
-            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            connection.setReadTimeout(READ_TIMEOUT_MS);
-            connection.setDoOutput(true);
-            connection.setUseCaches(false);
-
-            connection.setRequestProperty(
-                    "Content-Type",
-                    "application/json; charset=UTF-8"
-            );
-
-            connection.setRequestProperty(
-                    "Accept",
-                    "application/json"
-            );
-
-            JSONObject requestBody = new JSONObject();
-            requestBody.put("message", question);
-            requestBody.put(
-                    "history",
-                    new JSONArray(contextHistoryJson)
-            );
-
-            byte[] requestBytes = requestBody.toString().getBytes(
-                    StandardCharsets.UTF_8
-            );
-
-            connection.setFixedLengthStreamingMode(requestBytes.length);
-
-            try (OutputStream outputStream = connection.getOutputStream()) {
-                outputStream.write(requestBytes);
-                outputStream.flush();
-            }
-
-            int responseCode = connection.getResponseCode();
-
-            InputStream responseStream =
-                    responseCode >= 200 && responseCode < 300
-                            ? connection.getInputStream()
-                            : connection.getErrorStream();
-
-            if (responseStream == null) {
-                throw new Exception(
-                        "The server did not return a response. Please try again."
-                );
-            }
-
-            String responseText = readResponse(responseStream);
-
-            JSONObject responseJson = new JSONObject(responseText);
-
-            if (responseCode < 200 || responseCode >= 300) {
-                String serverError = responseJson.optString(
-                        "error",
-                        "The AI service could not process your request."
-                );
-
-                throw new Exception(
-                        "Server error (" + responseCode + "): " + serverError
-                );
-            }
-
-            boolean success = responseJson.optBoolean("success", false);
-            String reply = responseJson.optString("reply", "").trim();
-
-            if (!success || reply.isEmpty()) {
-                String serverError = responseJson.optString(
-                        "error",
-                        "The AI returned an empty or invalid response."
-                );
-
-                throw new Exception(serverError);
-            }
-
-            runOnUiThread(() -> {
-                if (isActivityDestroyed) {
-                    return;
-                }
-
-                addChatMessage("P AI", reply);
-                updateStatus("Ready");
-                requestInProgress = false;
-                restoreSendButton();
-
-                // Deliberately do not speak automatically.
-                // The user must tap the speaker button on this response.
-            });
-
-        } catch (Exception e) {
-            String errorMessage = e.getMessage();
-
-            if (errorMessage == null || errorMessage.trim().isEmpty()) {
-                errorMessage =
-                        "An unexpected connection error occurred.";
-            }
-
-            final String displayError = errorMessage;
-
-            runOnUiThread(() -> {
-                if (isActivityDestroyed) {
-                    return;
-                }
-
-                addChatMessage(
-                        "System",
-                        "I couldn't get a response: " + displayError
-                );
-
-                updateStatus("Connection failed");
-                requestInProgress = false;
-                restoreSendButton();
-            });
-
-        } finally {
-            if (connection != null) {
-                connection.disconnect();
-            }
-        }
-    }
-
-    private String readResponse(InputStream inputStream) throws Exception {
-        StringBuilder responseBuilder = new StringBuilder();
-
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(
-                        inputStream,
-                        StandardCharsets.UTF_8
+        new AlertDialog.Builder(this)
+                .setTitle("Log Out")
+                .setMessage(
+                        "The secure logout action will be connected to your existing AuthSessionManager. We will not clear your session using an unverified method."
                 )
-        )) {
-            String line;
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Continue", (dialog, which) -> {
 
-            while ((line = reader.readLine()) != null) {
-                // Preserve line boundaries in the JSON response body.
-                responseBuilder.append(line).append('\n');
-            }
-        }
-
-        return responseBuilder.toString();
-    }
-
-    private void restoreSendButton() {
-        if (sendButton != null && !isActivityDestroyed) {
-            sendButton.setEnabled(true);
-            sendButton.setText("↑");
-            updateComposerButtons();
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // Installed application launching
-    // ---------------------------------------------------------------------
-
-    private void openInstalledApplication(String appName) {
-        if (appName == null || appName.trim().isEmpty()) {
-            addChatMessage(
-                    "P AI",
-                    "Please specify the application you want to open."
-            );
-            return;
-        }
-
-        String requestedName = appName.trim();
-
-        try {
-            Intent launcherQuery = new Intent(Intent.ACTION_MAIN);
-            launcherQuery.addCategory(Intent.CATEGORY_LAUNCHER);
-
-            List<ResolveInfo> installedApps =
-                    getPackageManager().queryIntentActivities(
-                            launcherQuery,
-                            0
+                    showMessage(
+                            "Secure logout integration is pending."
                     );
 
-            ResolveInfo exactMatch = null;
-            ResolveInfo partialMatch = null;
+                })
+                .show();
+    }
 
-            for (ResolveInfo app : installedApps) {
-                if (app.activityInfo == null) {
-                    continue;
-                }
+    // =========================================================
+    // HELP AND ABOUT
+    // =========================================================
 
-                String label = app.loadLabel(
-                        getPackageManager()
-                ).toString();
+    private void showHelpAndAbout() {
 
-                if (label.equalsIgnoreCase(requestedName)) {
-                    exactMatch = app;
-                    break;
-                }
+        new AlertDialog.Builder(this)
+                .setTitle("About P AI System Manager")
+                .setMessage(
+                        "P AI System Manager\n\nYour intelligent personal assistant and device manager.\n\nVersion 1.1\n\nDeveloped by P Graphics."
+                )
+                .setPositiveButton("Close", null)
+                .show();
+    }
 
-                if (partialMatch == null
-                        && label.toLowerCase(Locale.ROOT)
-                        .contains(requestedName.toLowerCase(Locale.ROOT))) {
-                    partialMatch = app;
-                }
-            }
+    // =========================================================
+    // DEVICE INFORMATION
+    // =========================================================
 
-            ResolveInfo selectedApp =
-                    exactMatch != null ? exactMatch : partialMatch;
+    private void updateDeviceInformation() {
 
-            if (selectedApp == null) {
-                addChatMessage(
-                        "P AI",
-                        "I couldn't find an installed application named "
-                                + requestedName + "."
-                );
-                return;
-            }
+        updateStorageInformation();
 
-            String packageName =
-                    selectedApp.activityInfo.packageName;
+        updateRamInformation();
 
-            Intent launchIntent =
-                    getPackageManager().getLaunchIntentForPackage(packageName);
+        updateBatteryInformation();
 
-            if (launchIntent == null) {
-                addChatMessage(
-                        "P AI",
-                        "I found " + selectedApp.loadLabel(getPackageManager())
-                                + ", but Android did not provide a launch action."
-                );
-                return;
-            }
+        updateAndroidInformation();
+    }
 
-            addChatMessage(
-                    "P AI",
-                    "Opening " + selectedApp.loadLabel(getPackageManager()) + "..."
+    // =========================================================
+    // STORAGE
+    // =========================================================
+
+    private void updateStorageInformation() {
+
+        try {
+
+            StatFs stat = new StatFs(
+                    Environment.getDataDirectory().getPath()
             );
 
-            startActivity(launchIntent);
+            long available =
+                    stat.getAvailableBytes();
+
+            storageValue.setText(
+                    formatStorage(available)
+            );
 
         } catch (Exception e) {
-            addChatMessage(
-                    "P AI",
-                    "I couldn't open that application. Please try again."
+
+            storageValue.setText("--");
+        }
+    }
+
+    private void showStorageInformation() {
+
+        try {
+
+            StatFs stat = new StatFs(
+                    Environment.getDataDirectory().getPath()
+            );
+
+            long total = stat.getTotalBytes();
+
+            long available = stat.getAvailableBytes();
+
+            long used = total - available;
+
+            String message =
+                    "Total storage: " + formatStorage(total)
+                    + "\nUsed storage: " + formatStorage(used)
+                    + "\nAvailable storage: " + formatStorage(available);
+
+            showInformationDialog(
+                    "Storage Information",
+                    message
+            );
+
+        } catch (Exception e) {
+
+            showMessage(
+                    "Unable to read storage information."
             );
         }
     }
+
+    // =========================================================
+    // RAM
+    // =========================================================
+
+    private void updateRamInformation() {
+
+        try {
+
+            ActivityManager manager =
+                    (ActivityManager) getSystemService(
+                            ACTIVITY_SERVICE
+                    );
+
+            ActivityManager.MemoryInfo info =
+                    new ActivityManager.MemoryInfo();
+
+            manager.getMemoryInfo(info);
+
+            long total = info.totalMem;
+
+            long available = info.availMem;
+
+            long used = total - available;
+
+            int percentage = total > 0
+                    ? (int) ((used * 100L) / total)
+                    : 0;
+
+            ramValue.setText(
+                    percentage + "%"
+            );
+
+        } catch (Exception e) {
+
+            ramValue.setText("--");
+        }
+    }
+
+    // =========================================================
+    // BATTERY
+    // =========================================================
+
+    private void updateBatteryInformation() {
+
+        try {
+
+            Intent batteryIntent = registerReceiver(
+                    null,
+                    new android.content.IntentFilter(
+                            Intent.ACTION_BATTERY_CHANGED
+                    )
+            );
+
+            if (batteryIntent == null) {
+
+                batteryValue.setText("--");
+
+                return;
+            }
+
+            int level = batteryIntent.getIntExtra(
+                    BatteryManager.EXTRA_LEVEL,
+                    -1
+            );
+
+            int scale = batteryIntent.getIntExtra(
+                    BatteryManager.EXTRA_SCALE,
+                    -1
+            );
+
+            if (level >= 0 && scale > 0) {
+
+                int percentage =
+                        (level * 100) / scale;
+
+                batteryValue.setText(
+                        percentage + "%"
+                );
+
+            } else {
+
+                batteryValue.setText("--");
+            }
+
+        } catch (Exception e) {
+
+            batteryValue.setText("--");
+        }
+    }
+
+    // =========================================================
+    // ANDROID VERSION
+    // =========================================================
+
+    private void updateAndroidInformation() {
+
+        androidValue.setText(
+                "Android " + Build.VERSION.RELEASE
+        );
+    }
+
+    private void showBatteryInformation() {
+
+        showInformationDialog(
+                "Battery Information",
+                "Current battery level: "
+                        + batteryValue.getText().toString()
+        );
+    }
+
+    private void showAndroidInformation() {
+
+        showInformationDialog(
+                "Android Information",
+                "Android version: "
+                        + Build.VERSION.RELEASE
+                        + "\nAPI level: "
+                        + Build.VERSION.SDK_INT
+                        + "\nDevice manufacturer: "
+                        + Build.MANUFACTURER
+                        + "\nDevice model: "
+                        + Build.MODEL
+        );
+    }
+
+    // =========================================================
+    // GENERAL INFORMATION DIALOG
+    // =========================================================
+
+    private void showInformationDialog(
+            String title,
+            String message
+    ) {
+
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton("Close", null)
+                .show();
+    }
+
+    // =========================================================
+    // FEATURE NOTICE
+    // =========================================================
+
+    private void showFeatureNotice(
+            String title,
+            String message
+    ) {
+
+        showInformationDialog(
+                title,
+                message
+        );
+    }
+
+    // =========================================================
+    // SECTION TITLE
+    // =========================================================
+
+    private void addSectionTitle(
+            String title,
+            String subtitle
+    ) {
+
+        TextView titleView = createText(
+                title,
+                18,
+                WHITE,
+                true
+        );
+
+        LinearLayout.LayoutParams titleParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        titleParams.topMargin = dp(24);
+
+        contentContainer.addView(
+                titleView,
+                titleParams
+        );
+
+        TextView subtitleView = createText(
+                subtitle,
+                11,
+                MUTED,
+                false
+        );
+
+        LinearLayout.LayoutParams subtitleParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        subtitleParams.topMargin = dp(5);
+
+        subtitleParams.bottomMargin = dp(12);
+
+        contentContainer.addView(
+                subtitleView,
+                subtitleParams
+        );
+    }
+
+    // =========================================================
+    // TEXT VIEW FACTORY
+    // =========================================================
+
+    private TextView createText(
+            String text,
+            int size,
+            int color,
+            boolean bold
+    ) {
+
+        TextView view = new TextView(this);
+
+        view.setText(text);
+
+        view.setTextSize(size);
+
+        view.setTextColor(color);
+
+        view.setGravity(Gravity.CENTER_VERTICAL);
+
+        if (bold) {
+
+            view.setTypeface(
+                    Typeface.DEFAULT,
+                    Typeface.BOLD
+            );
+        }
+
+        return view;
+    }
+
+    // =========================================================
+    // BACKGROUND FACTORY
+    // =========================================================
+
+    private GradientDrawable roundedBackground(
+            int backgroundColor,
+            int radius,
+            int strokeColor
+    ) {
+
+        GradientDrawable drawable =
+                new GradientDrawable();
+
+        drawable.setColor(backgroundColor);
+
+        drawable.setCornerRadius(
+                dp(radius)
+        );
+
+        drawable.setStroke(
+                dp(1),
+                strokeColor
+        );
+
+        return drawable;
+    }
+
+    // =========================================================
+    // WEIGHTED LAYOUT PARAMETERS
+    // =========================================================
+
+    private LinearLayout.LayoutParams weightedParams() {
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        1
+                );
+
+        params.setMargins(
+                dp(4),
+                0,
+                dp(4),
+                0
+        );
+
+        return params;
+    }
+
+    // =========================================================
+    // STORAGE FORMATTER
+    // =========================================================
+
+    private String formatStorage(long bytes) {
+
+        double gb = bytes / (1024.0 * 1024.0 * 1024.0);
+
+        DecimalFormat format =
+                new DecimalFormat("0.0");
+
+        return format.format(gb) + " GB";
+    }
+
+    // =========================================================
+    // DISPLAY DIMENSIONS
+    // =========================================================
+
+    private int dp(int value) {
+
+        return (int) (
+                value * getResources()
+                        .getDisplayMetrics()
+                        .density + 0.5f
+        );
+    }
+
+    // =========================================================
+    // USER MESSAGE
+    // =========================================================
+
+    private void showMessage(String message) {
+
+        Toast.makeText(
+                this,
+                message,
+                Toast.LENGTH_LONG
+        ).show();
+    }
+
+    // =========================================================
+    // END OF MAINACTIVITY.JAVA
+    // =========================================================
 }
